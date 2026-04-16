@@ -18,12 +18,12 @@ import { getFirestore } from "firebase/firestore";
 // };
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCzI1l4xrvz6xWruHX1mkaoZnoZYocBkbE",
-  authDomain: "farm-link-777.firebaseapp.com",
-  projectId: "farm-link-777",
-  storageBucket: "farm-link-777.firebasestorage.app",
-  messagingSenderId: "453676958479",
-  appId: "1:453676958479:web:e31f78c5fc417106e1747a",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID,
 };
 
 // ─── Guard: detect placeholder config at startup ──────────────────────────────
