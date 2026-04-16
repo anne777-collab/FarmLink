@@ -1,0 +1,39 @@
+// firestore.rules
+// Deploy with: firebase deploy --only firestore:rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Users: can read any, only write own
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Workers: can read any, only write own
+    match /workers/{workerId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == workerId;
+    }
+
+    // Job Requests: farmer or worker in the request can read/write
+    match /jobRequests/{jobId} {
+      allow read: if request.auth != null && (
+        resource.data.farmerId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid
+      );
+      allow create: if request.auth != null &&
+        request.resource.data.farmerId == request.auth.uid;
+      allow update: if request.auth != null && (
+        resource.data.farmerId == request.auth.uid ||
+        resource.data.workerId == request.auth.uid
+      );
+    }
+
+    // Subscriptions: only own
+    match /subscriptions/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
