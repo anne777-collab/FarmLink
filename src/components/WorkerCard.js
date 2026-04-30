@@ -2,7 +2,7 @@
 import React from "react";
 import { Phone, MapPin, Star, CheckCircle, Clock } from "lucide-react";
 import { Card, Badge, Button } from "./UI";
-import { WORK_TYPE_MAP } from "../utils/helpers";
+import { WORK_TYPE_MAP, formatDistance } from "../utils/helpers";
 
 export default function WorkerCard({ worker, onHire, onCall, distance }) {
   const { user, workType, wage, availability, rating, totalJobs } = worker;
@@ -41,7 +41,7 @@ export default function WorkerCard({ worker, onHire, onCall, distance }) {
             {distance != null && (
               <span className="flex items-center gap-1 text-xs text-gray-400">
                 <MapPin className="w-3 h-3" />
-                {distance < 1 ? `${(distance * 1000).toFixed(0)}m` : `${distance.toFixed(1)}km`}
+                {formatDistance(distance)}
               </span>
             )}
           </div>

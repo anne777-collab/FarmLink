@@ -15,6 +15,7 @@ import {
   limit,
   runTransaction,
   onSnapshot,
+  arrayUnion,          // Task 3: store individual ratings in an array
 } from "firebase/firestore";
 import { db } from "./config";
 
@@ -353,8 +354,10 @@ export const updateJobStatus = async (jobId, status) => {
   const allowed = ["pending", "accepted", "rejected", "completed"];
   if (!allowed.includes(status))
     throw new Error(`updateJobStatus: invalid status "${status}"`);
+  // Task 1: stamp completedAt when a job is marked completed so we can sort and count accurately
+  const extra = status === "completed" ? { completedAt: serverTimestamp() } : {};
   await withTimeout(
-    updateDoc(doc(db, "jobRequests", jobId), { status, updatedAt: serverTimestamp() }),
+    updateDoc(doc(db, "jobRequests", jobId), { status, updatedAt: serverTimestamp(), ...extra }),
     10_000, "updateJobStatus"
   );
 };
@@ -430,19 +433,23 @@ export const getExistingRating = async (farmerId, workerId) => {
 /**
  * Submit (or update) a rating.
  *
- * - First call:  creates ratings/{farmerId}_{workerId} + increments worker avg
- * - Second call: updates the same doc + recalculates worker avg correctly
+ * Task 3 — Ratings are now stored as an array in both the ratings doc and
+ * computed from that array so every individual vote is preserved.
  *
- * Uses a transaction so the rolling average stays consistent under concurrency.
+ * ratings/{farmerId}_{workerId}  →  { farmerId, workerId, ratings: [5,3,...], createdAt, updatedAt }
+ * workers/{workerId}             →  { rating: <avg>, totalRatings: <count>, ... }
+ *
+ * One farmer, one worker = one doc. Each new vote appends to the array;
+ * the worker's stored average is always recomputed from the full array.
  */
-export const rateWorker = async (farmerId, workerId, rating) => {
+export const rateWorker = async (farmerId, workerId, newRating) => {
   if (!farmerId) throw new Error("rateWorker: farmerId required");
   if (!workerId) throw new Error("rateWorker: workerId required");
-  if (rating < 1 || rating > 5) throw new Error("rateWorker: rating must be 1–5");
+  if (newRating < 1 || newRating > 5) throw new Error("rateWorker: rating must be 1–5");
 
   const ratingId  = `${farmerId}_${workerId}`;
-  const ratingRef = doc(db, "ratings",  ratingId);
-  const workerRef = doc(db, "workers",  workerId);
+  const ratingRef = doc(db, "ratings", ratingId);
+  const workerRef = doc(db, "workers", workerId);
 
   await withTimeout(
     runTransaction(db, async (tx) => {
@@ -453,44 +460,38 @@ export const rateWorker = async (farmerId, workerId, rating) => {
 
       if (!workerSnap.exists()) throw new Error("Worker profile not found");
 
-      const {
-        rating:       curAvg      = 0,
-        totalRatings: curTotal    = 0,
-        totalJobs:    curJobs     = 0,
-      } = workerSnap.data();
+      const { totalJobs: curJobs = 0 } = workerSnap.data();
 
-      let newAvg, newTotal;
+      let updatedArray;
 
       if (ratingSnap.exists()) {
-        // UPDATE: subtract the old rating, add the new one
-        const oldRating = ratingSnap.data().rating;
-        newTotal = curTotal; // count stays the same
-        newAvg   = curTotal === 0
-          ? rating
-          : (curAvg * curTotal - oldRating + rating) / curTotal;
-
+        // Append the new vote to the existing array
+        const existingArr = ratingSnap.data().ratings ?? [];
+        updatedArray = [...existingArr, newRating];
         tx.update(ratingRef, {
-          rating,
+          ratings:   arrayUnion(newRating),   // Firestore arrayUnion keeps it atomic
           updatedAt: serverTimestamp(),
         });
       } else {
-        // NEW rating
-        newTotal = curTotal + 1;
-        newAvg   = (curAvg * curTotal + rating) / newTotal;
-
+        // First rating from this farmer for this worker
+        updatedArray = [newRating];
         tx.set(ratingRef, {
           farmerId,
           workerId,
-          rating,
+          ratings:   [newRating],
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
       }
 
+      // Recompute true average from the full array
+      const avg      = updatedArray.reduce((s, v) => s + v, 0) / updatedArray.length;
+      const rounded  = Math.round(avg * 10) / 10; // 1 decimal
+
       tx.update(workerRef, {
-        rating:       newAvg,
-        totalRatings: newTotal,
-        totalJobs:    Math.max(curJobs, newTotal),
+        rating:       rounded,
+        totalRatings: updatedArray.length,
+        totalJobs:    Math.max(curJobs, updatedArray.length),
         updatedAt:    serverTimestamp(),
       });
     }),
@@ -687,10 +688,13 @@ export const updateRequestStatus = async (requestId, status) => {
   const allowed = ["pending", "accepted", "rejected", "completed"];
   if (!allowed.includes(status))
     throw new Error(`updateRequestStatus: invalid status "${status}"`);
+  // Task 1: stamp completedAt when completed for accurate counting and sorting
+  const extra = status === "completed" ? { completedAt: serverTimestamp() } : {};
   await withTimeout(
     updateDoc(doc(db, "jobRequests", requestId), {
       status,
       updatedAt: serverTimestamp(),
+      ...extra,
     }),
     10_000,
     "updateRequestStatus"

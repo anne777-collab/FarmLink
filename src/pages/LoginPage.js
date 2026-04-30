@@ -1,155 +1,20 @@
 // src/pages/LoginPage.js
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth";
-import { auth } from "../firebase/config";
-import { getUser, createUser } from "../firebase/firestore";
+// Changes from previous version:
+//   - PhoneOtpLogin component removed (phone auth discontinued)
+//   - Method tab switcher removed (no longer needed with only one method)
+//   - ForgotPasswordView added inside EmailAuthForm
+//   - All phone-related imports (RecaptchaVerifier, signInWithPhoneNumber) removed
+//   - Google login and Email/Password login are fully preserved
+
+import React, { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
+import { getUser } from "../firebase/firestore";
 import { useAuth } from "../context/AuthContext";
 import { Button, Input } from "../components/UI";
 import toast from "react-hot-toast";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PHONE OTP LOGIN (unchanged)
-// ─────────────────────────────────────────────────────────────────────────────
-function PhoneOtpLogin({ onNeedProfile }) {
-  const [step, setStep] = useState("phone");
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [loading, setLoading] = useState(false);
-  const [confirmResult, setConfirmResult] = useState(null);
-
-  const otpRefs = useRef([]);
-  const recaptchaVerifierRef = useRef(null);
-  const { refreshProfile } = useAuth();
-
-  const clearRecaptcha = useCallback(() => {
-    try { if (recaptchaVerifierRef.current) recaptchaVerifierRef.current.clear(); }
-    catch (_) {}
-    finally { recaptchaVerifierRef.current = null; }
-  }, []);
-
-  const initRecaptcha = useCallback(() => {
-    clearRecaptcha();
-    if (!document.getElementById("recaptcha-container"))
-      throw new Error("[FarmLink] #recaptcha-container not found");
-    recaptchaVerifierRef.current = new RecaptchaVerifier(auth, "recaptcha-container", {
-      size: "invisible",
-      callback: () => {},
-      "expired-callback": () => clearRecaptcha(),
-    });
-    return recaptchaVerifierRef.current;
-  }, [clearRecaptcha]);
-
-  useEffect(() => () => clearRecaptcha(), [clearRecaptcha]);
-
-  const sendOTP = async () => {
-    const cleaned = phone.replace(/\D/g, "");
-    if (cleaned.length < 10) { toast.error("Enter a valid 10-digit phone number"); return; }
-    setLoading(true);
-    try {
-      const verifier = initRecaptcha();
-      const formatted = cleaned.startsWith("91") ? `+${cleaned}` : `+91${cleaned}`;
-      const result = await signInWithPhoneNumber(auth, formatted, verifier);
-      setConfirmResult(result);
-      setStep("otp");
-      toast.success("OTP sent!");
-    } catch (err) {
-      clearRecaptcha();
-      const msg = err?.code === "auth/invalid-phone-number" ? "Invalid phone number."
-        : err?.code === "auth/too-many-requests" ? "Too many attempts. Try later."
-        : err?.message || "Failed to send OTP.";
-      toast.error(msg);
-    } finally { setLoading(false); }
-  };
-
-  const verifyOTP = async () => {
-    const code = otp.join("");
-    if (code.length < 6) { toast.error("Enter 6-digit OTP"); return; }
-    if (!confirmResult) { toast.error("Session expired. Resend OTP."); goBackToPhone(); return; }
-    setLoading(true);
-    try {
-      const result = await confirmResult.confirm(code);
-      clearRecaptcha();
-      const profile = await getUser(result.user.uid);
-      await refreshProfile();
-      if (!profile) onNeedProfile(result.user.uid);
-      toast.success("Login successful!");
-    } catch (err) {
-      const msg = err?.code === "auth/invalid-verification-code" ? "Wrong OTP. Try again."
-        : err?.code === "auth/code-expired" ? "OTP expired. Request a new one."
-        : "Verification failed.";
-      toast.error(msg);
-    } finally { setLoading(false); }
-  };
-
-  const handleOtpChange = (value, idx) => {
-    const v = value.replace(/\D/g, "").slice(-1);
-    const next = [...otp]; next[idx] = v; setOtp(next);
-    if (v && idx < 5) otpRefs.current[idx + 1]?.focus();
-    if (!v && idx > 0) otpRefs.current[idx - 1]?.focus();
-  };
-
-  const handleOtpKeyDown = (e, idx) => {
-    if (e.key === "Backspace" && !otp[idx] && idx > 0) otpRefs.current[idx - 1]?.focus();
-  };
-
-  const goBackToPhone = () => {
-    clearRecaptcha(); setConfirmResult(null);
-    setOtp(["", "", "", "", "", ""]); setStep("phone");
-  };
-
-  return (
-    <>
-      {step === "phone" ? (
-        <>
-          <h2 className="text-2xl font-bold text-gray-800 mb-1">Login / Sign In</h2>
-          <p className="text-gray-500 text-sm mb-6">Enter your mobile number to continue</p>
-          <div className="flex gap-2 mb-5">
-            <div className="bg-gray-100 rounded-xl px-3 py-3 text-gray-600 font-semibold text-base
-                            flex items-center select-none">+91</div>
-            <Input
-              placeholder="10-digit mobile number"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-              maxLength={10} type="tel" inputMode="numeric" autoComplete="tel-national"
-            />
-          </div>
-          <Button variant="primary" size="lg" onClick={sendOTP} loading={loading}>
-            Send OTP / OTP Bhejein
-          </Button>
-        </>
-      ) : (
-        <>
-          <h2 className="text-2xl font-bold text-gray-800 mb-1">Enter OTP</h2>
-          <p className="text-gray-500 text-sm mb-6">Sent to +91 {phone.replace(/\D/g,"").slice(-10)}</p>
-          <div className="flex gap-2 justify-between mb-6">
-            {otp.map((digit, i) => (
-              <input key={i}
-                ref={(el) => (otpRefs.current[i] = el)}
-                value={digit}
-                onChange={(e) => handleOtpChange(e.target.value, i)}
-                onKeyDown={(e) => handleOtpKeyDown(e, i)}
-                maxLength={1} type="tel" inputMode="numeric" autoComplete="one-time-code"
-                className="w-12 h-14 text-center text-2xl font-bold border-2 rounded-xl
-                           outline-none transition-all focus:border-green-500 bg-gray-50 caret-transparent"
-              />
-            ))}
-          </div>
-          <Button variant="primary" size="lg" onClick={verifyOTP} loading={loading}>
-            Verify OTP
-          </Button>
-          <button type="button" onClick={goBackToPhone}
-            className="w-full mt-3 text-center text-green-600 text-sm font-medium py-2">
-            Change number
-          </button>
-        </>
-      )}
-      <div id="recaptcha-container" />
-    </>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GOOGLE LOGIN BUTTON
+// GOOGLE LOGIN BUTTON (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 function GoogleLoginButton({ onNeedProfile }) {
   const { signInWithGoogle, refreshProfile } = useAuth();
@@ -161,13 +26,10 @@ function GoogleLoginButton({ onNeedProfile }) {
       const user = await signInWithGoogle();
       const profile = await getUser(user.uid);
       await refreshProfile();
-      if (!profile) {
-        // New Google user — create a basic users doc with email, then go to setup
-        onNeedProfile(user.uid);
-      }
-      // Existing user: AppRouter will re-route automatically via onAuthStateChanged
+      if (!profile) onNeedProfile(user.uid);
+      // Existing users: AppRouter re-routes automatically via onAuthStateChanged
     } catch (err) {
-      if (err?.code === "auth/popup-closed-by-user") return; // silent — user closed popup
+      if (err?.code === "auth/popup-closed-by-user") return; // user closed popup — silent
       toast.error("Google sign-in failed. Please try again.");
       console.error("[GoogleLoginButton]", err);
     } finally {
@@ -186,7 +48,7 @@ function GoogleLoginButton({ onNeedProfile }) {
       {loading ? (
         <span className="w-5 h-5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
       ) : (
-        /* Google G logo — inline SVG, no external deps */
+        /* Google G logo — inline SVG, no external dependencies */
         <svg viewBox="0 0 24 24" className="w-5 h-5" aria-hidden="true">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -200,36 +62,43 @@ function GoogleLoginButton({ onNeedProfile }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EMAIL LOGIN / SIGNUP
+// EMAIL LOGIN / SIGNUP  (with inline Forgot Password)
 // ─────────────────────────────────────────────────────────────────────────────
 function EmailAuthForm({ onNeedProfile }) {
-  const { signUpWithEmail, signInWithEmail, refreshProfile } = useAuth();
-  const [mode,     setMode]     = useState("login"); // "login" | "signup"
-  const [email,    setEmail]    = useState("");
-  const [password, setPassword] = useState("");
-  const [loading,  setLoading]  = useState(false);
+  const { signUpWithEmail, signInWithEmail, resetPassword, refreshProfile } = useAuth();
 
+  // "login" | "signup" | "forgot" — controls which view is shown
+  const [view,         setView]        = useState("login");
+  const [email,        setEmail]       = useState("");
+  const [password,     setPassword]    = useState("");
+  const [loading,      setLoading]     = useState(false);
+  const [showPassword, setShowPassword] = useState(false); // Task 1: eye toggle
+
+  // ── Email / Password submit ─────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!email.trim())    { toast.error("Enter your email");    return; }
-    if (password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    if (!email.trim())        { toast.error("Enter your email");                     return; }
+    if (password.length < 6)  { toast.error("Password must be at least 6 characters"); return; }
+
     setLoading(true);
     try {
-      if (mode === "signup") {
-        const user = await signUpWithEmail(email, password);
+      if (view === "signup") {
+        const user = await signUpWithEmail(email.trim(), password);
         const profile = await getUser(user.uid);
         await refreshProfile();
         if (!profile) onNeedProfile(user.uid);
         toast.success("Account created!");
       } else {
-        await signInWithEmail(email, password);
+        await signInWithEmail(email.trim(), password);
         await refreshProfile();
         toast.success("Login successful!");
       }
     } catch (err) {
-      const msg = err?.code === "auth/email-already-in-use" ? "Email already registered."
-        : err?.code === "auth/user-not-found"    ? "No account found with this email."
-        : err?.code === "auth/wrong-password"    ? "Incorrect password."
-        : err?.code === "auth/invalid-email"     ? "Invalid email address."
+      const msg =
+        err?.code === "auth/email-already-in-use"  ? "Email already registered. Try logging in."
+        : err?.code === "auth/user-not-found"       ? "No account found. Sign up first."
+        : err?.code === "auth/wrong-password"       ? "Incorrect password."
+        : err?.code === "auth/invalid-email"        ? "Invalid email address."
+        : err?.code === "auth/invalid-credential"   ? "Invalid email or password."
         : "Authentication failed. Try again.";
       toast.error(msg);
       console.error("[EmailAuthForm]", err);
@@ -238,6 +107,64 @@ function EmailAuthForm({ onNeedProfile }) {
     }
   };
 
+  // ── Forgot Password submit ──────────────────────────────────────────────
+  const handleForgotPassword = async () => {
+    if (!email.trim()) { toast.error("Enter your email address first"); return; }
+
+    setLoading(true);
+    try {
+      await resetPassword(email.trim());
+      toast.success("Password reset email sent. Check your inbox.");
+      // Return to login view after a short delay so the user sees the toast
+      setTimeout(() => setView("login"), 1500);
+    } catch (err) {
+      const msg =
+        err?.code === "auth/user-not-found"  ? "No account found with this email."
+        : err?.code === "auth/invalid-email" ? "Invalid email address."
+        : "Could not send reset email. Try again.";
+      toast.error(msg);
+      console.error("[ForgotPassword]", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Forgot Password view ────────────────────────────────────────────────
+  if (view === "forgot") {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Reset Password</h2>
+          <p className="text-gray-500 text-sm mt-1">
+            Enter your email and we'll send a reset link.
+          </p>
+        </div>
+
+        <Input
+          label="Email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+
+        <Button variant="primary" size="lg" onClick={handleForgotPassword} loading={loading}>
+          Send Reset Email
+        </Button>
+
+        <button
+          type="button"
+          onClick={() => setView("login")}
+          className="w-full text-center text-sm text-green-600 font-semibold hover:underline py-1">
+          &#8592; Back to Login
+        </button>
+      </div>
+    );
+  }
+
+  // ── Login / Signup view ─────────────────────────────────────────────────
   return (
     <div className="space-y-3">
       <Input
@@ -249,23 +176,54 @@ function EmailAuthForm({ onNeedProfile }) {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
-      <Input
-        label="Password"
-        type="password"
-        autoComplete={mode === "signup" ? "new-password" : "current-password"}
-        placeholder={mode === "signup" ? "At least 6 characters" : "Your password"}
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
+
+      <div>
+        {/* Password field with show/hide toggle */}
+        <div className="relative">
+          <Input
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            autoComplete={view === "signup" ? "new-password" : "current-password"}
+            placeholder={view === "signup" ? "At least 6 characters" : "Your password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            className="absolute right-3 top-[38px] text-gray-400 hover:text-gray-600
+                       transition-colors focus:outline-none"
+            aria-label={showPassword ? "Hide password" : "Show password"}>
+            {showPassword
+              ? <EyeOff className="w-5 h-5" />
+              : <Eye    className="w-5 h-5" />}
+          </button>
+        </div>
+
+        {/* Forgot Password link — only shown on login view */}
+        {view === "login" && (
+          <div className="flex justify-end mt-1">
+            <button
+              type="button"
+              onClick={() => setView("forgot")}
+              className="text-xs text-green-600 font-medium hover:underline">
+              Forgot Password?
+            </button>
+          </div>
+        )}
+      </div>
+
       <Button variant="primary" size="lg" onClick={handleSubmit} loading={loading}>
-        {mode === "signup" ? "Create Account" : "Login with Email"}
+        {view === "signup" ? "Create Account" : "Login with Email"}
       </Button>
+
       <p className="text-center text-sm text-gray-500">
-        {mode === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
-        <button type="button"
-          onClick={() => setMode(mode === "signup" ? "login" : "signup")}
+        {view === "signup" ? "Already have an account?" : "Don't have an account?"}{" "}
+        <button
+          type="button"
+          onClick={() => setView(view === "signup" ? "login" : "signup")}
           className="text-green-600 font-semibold hover:underline">
-          {mode === "signup" ? "Login" : "Sign up"}
+          {view === "signup" ? "Login" : "Sign up"}
         </button>
       </p>
     </div>
@@ -276,9 +234,6 @@ function EmailAuthForm({ onNeedProfile }) {
 // MAIN LOGIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LoginPage({ onNeedProfile }) {
-  // "phone" | "email" — which login method is shown
-  const [method, setMethod] = useState("phone");
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-600 to-green-800 flex flex-col">
       {/* Hero */}
@@ -294,29 +249,9 @@ export default function LoginPage({ onNeedProfile }) {
       </div>
 
       {/* Bottom sheet */}
-      <div className="bg-white rounded-t-3xl px-6 pt-6 pb-10">
-        {/* Method tabs */}
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-6">
-          {[
-            { id: "phone", label: "&#128222; Phone" },
-            { id: "email", label: "&#128140; Email" },
-          ].map(({ id, label }) => (
-            <button key={id} type="button" onClick={() => setMethod(id)}
-              className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all
-                ${method === id
-                  ? "bg-white shadow text-green-700"
-                  : "text-gray-500 hover:text-gray-700"}`}
-              dangerouslySetInnerHTML={{ __html: label }}
-            />
-          ))}
-        </div>
-
-        {/* Login form */}
-        {method === "phone" ? (
-          <PhoneOtpLogin onNeedProfile={onNeedProfile} />
-        ) : (
-          <EmailAuthForm onNeedProfile={onNeedProfile} />
-        )}
+      <div className="bg-white rounded-t-3xl px-6 pt-8 pb-10">
+        {/* Email / Password form */}
+        <EmailAuthForm onNeedProfile={onNeedProfile} />
 
         {/* Divider */}
         <div className="flex items-center gap-3 my-5">
@@ -325,7 +260,7 @@ export default function LoginPage({ onNeedProfile }) {
           <div className="flex-1 h-px bg-gray-200" />
         </div>
 
-        {/* Google login — always visible regardless of method */}
+        {/* Google login */}
         <GoogleLoginButton onNeedProfile={onNeedProfile} />
       </div>
     </div>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "../../firebase/config";
-import { updateUser, getSubscription, activatePaidPlan } from "../../firebase/firestore";
+import { updateUser, getSubscription, activatePaidPlan, getFarmerRequestsRealtime } from "../../firebase/firestore";
 import { useAuth } from "../../context/AuthContext";
 import { Button, Input, Card, Badge } from "../../components/UI";
 import toast from "react-hot-toast";
@@ -12,7 +12,9 @@ export default function FarmerProfile() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: "", address: "" });
   const [loading, setLoading] = useState(false);
-  const [subscription, setSubscription] = useState(null);
+  const [subscription,  setSubscription]  = useState(null);
+  const [jobStats,      setJobStats]      = useState({ pending: 0, completed: 0 });
+  const [completedJobs, setCompletedJobs] = useState([]); // Task 5: list of completed jobs
 
   useEffect(() => {
     if (userProfile) {
@@ -22,6 +24,32 @@ export default function FarmerProfile() {
       getSubscription(userProfile.id).then(setSubscription);
     }
   }, [userProfile]);
+
+  // Single real-time listener drives both stats and completed jobs list
+  useEffect(() => {
+    if (!userProfile?.id) return;
+    const unsub = getFarmerRequestsRealtime(
+      userProfile.id,
+      (jobs) => {
+        // Task 1: count only status === "completed" for accurate completed count
+        const done = jobs.filter((j) => j.status === "completed");
+        setJobStats({
+          pending:   jobs.filter((j) => j.status === "pending").length,
+          completed: done.length,
+        });
+
+        // Task 5: sort completed jobs by completedAt desc, fall back to createdAt
+        const sorted = [...done].sort((a, b) => {
+          const ta = a.completedAt?.toMillis?.() ?? a.createdAt?.toMillis?.() ?? 0;
+          const tb = b.completedAt?.toMillis?.() ?? b.createdAt?.toMillis?.() ?? 0;
+          return tb - ta;
+        });
+        setCompletedJobs(sorted);
+      },
+      (err) => console.error("[FarmerProfile] jobStats:", err)
+    );
+    return () => unsub();
+  }, [userProfile?.id]);
 
   const save = async () => {
     if (!form.name.trim()) { toast.error("Name required"); return; }
@@ -68,6 +96,18 @@ export default function FarmerProfile() {
         <div className="mt-2 flex gap-2">
           <Badge color="green">🌾 Farmer</Badge>
           {isPaid ? <Badge color="blue">⭐ Pro Plan</Badge> : <Badge color="gray">Free Plan</Badge>}
+        </div>
+      </div>
+
+      {/* Job Statistics */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-center">
+          <p className="text-3xl font-black text-yellow-600">{jobStats.pending}</p>
+          <p className="text-yellow-700 text-xs font-semibold mt-1">Pending Jobs</p>
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+          <p className="text-3xl font-black text-green-600">{jobStats.completed}</p>
+          <p className="text-green-700 text-xs font-semibold mt-1">Completed Jobs</p>
         </div>
       </div>
 
@@ -118,6 +158,41 @@ export default function FarmerProfile() {
         </Card>
       )}
 
+      {/* Task 5: Completed Jobs section — sorted by most recent first */}
+      {completedJobs.length > 0 && (
+        <Card className="mb-4">
+          <h3 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full bg-blue-500 inline-block" />
+            Completed Jobs ({completedJobs.length})
+          </h3>
+          <div className="space-y-2">
+            {completedJobs.map((job) => {
+              const workerName = job.worker?.user?.name || "Worker";
+              const completedDate = job.completedAt?.toDate?.()
+                ? job.completedAt.toDate().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                : job.date || "—";
+              return (
+                <div key={job.id}
+                  className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-3 py-2.5">
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">{workerName}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {job.workType || "General"} · Rs.{job.offeredWage}/day
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0 ml-3">
+                    <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                      &#10003; Done
+                    </span>
+                    <p className="text-xs text-gray-400 mt-1">{completedDate}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
       {/* Subscription */}
       <Card className="mb-4">
         <h3 className="font-bold text-gray-700 mb-3">Subscription Plan</h3>
@@ -136,7 +211,7 @@ export default function FarmerProfile() {
                 <p className="font-bold text-gray-600 text-sm">Free</p>
                 <p className="text-2xl font-black text-gray-800 mt-1">₹0</p>
                 <ul className="text-xs text-gray-500 mt-2 space-y-1">
-                  <li>• 5 contacts/month</li>
+                  <li>• 3 contacts/month</li>
                   <li>• Basic search</li>
                 </ul>
                 <Badge color="gray" className="mt-2">Current Plan</Badge>

@@ -116,14 +116,66 @@ function ProfileForm({ role, uid, onBack }) {
     try {
       const c = await getLocation();
       setCoords(c);
+
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${c.lat}&lon=${c.lng}&format=json`,
+        `https://nominatim.openstreetmap.org/reverse?lat=${c.lat}&lon=${c.lng}&format=json&addressdetails=1`,
         { headers: { "Accept-Language": "en" } }
       );
       if (!res.ok) throw new Error("Reverse geocode failed");
       const json = await res.json();
-      const parts = json.display_name?.split(",") ?? [];
-      setAddress(parts.slice(0, 3).join(", ").trim());
+
+      // Extract structured address parts from the geocoder response.
+      // Nominatim uses its own field names; Google Maps API uses different ones.
+      // We try both so this works regardless of which geocoder is in use.
+      const a = json.address ?? {};
+
+      // Village — priority order per task spec + Nominatim fallbacks
+      const village =
+        a.sublocality           ||   // Google Maps sublocality
+        a.sublocality_level_1   ||   // Google Maps sublocality level 1
+        a.neighborhood          ||   // Google Maps neighborhood
+        a.village               ||   // Nominatim village
+        a.hamlet                ||   // Nominatim hamlet
+        a.suburb                ||   // Nominatim suburb
+        a.neighbourhood         ||   // Nominatim neighbourhood (British spelling)
+        "";
+
+      // City — locality (Google Maps) first, then Nominatim fallbacks
+      const city =
+        a.locality              ||   // Google Maps locality
+        a.city                  ||   // Nominatim city
+        a.town                  ||   // Nominatim town
+        a.county                ||   // Nominatim county
+        a.state_district        ||   // Nominatim state district
+        "";
+
+      // State — administrative_area_level_1 (Google Maps) first
+      const state =
+        a.administrative_area_level_1  ||   // Google Maps
+        a.state                        ||   // Nominatim
+        "";
+
+      // Pincode — postal_code (Google Maps) first
+      const pincode =
+        a.postal_code           ||   // Google Maps
+        a.postcode              ||   // Nominatim
+        "";
+
+      // Build human-readable string for display; fallback to display_name slice
+      const parts = [village, city, state, pincode].filter(Boolean);
+      const formatted = parts.length >= 2
+        ? parts.join(", ")
+        : (json.display_name?.split(",").slice(0, 3).join(", ").trim() ?? "");
+
+      setAddress(formatted);
+
+      // Task 2: store structured breakdown alongside coords on the coords object
+      // so handleSubmit can persist all fields without changing its call signature
+      c.village = village;
+      c.city    = city;
+      c.state   = state;
+      c.pincode = pincode;
+
       toast.success("Location detected!");
     } catch {
       toast.error("Could not detect location. Please enter manually.");
@@ -153,13 +205,26 @@ function ProfileForm({ role, uid, onBack }) {
         : "+91" + phone.replace(/\D/g, "").slice(-10);
 
       // ── Write 1: users collection ──────────────────────────────────────────
+      // Task 2: if coords has structured fields (from detectLocation), include them
+      // so distance calculations and display can use richer data later.
+      const locationPayload = coords
+        ? {
+            lat:     coords.lat,
+            lng:     coords.lng,
+            address,
+            // structured fields — only present when GPS was used; fall back to ""
+            village: coords.village  || "",
+            city:    coords.city     || "",
+            state:   coords.state    || "",
+            pincode: coords.pincode  || "",
+          }
+        : { address };
+
       await createUser(uid, {
         role,
         name: name.trim(),
         phone: resolvedPhone,
-        location: coords
-          ? { lat: coords.lat, lng: coords.lng, address }
-          : { address },
+        location: locationPayload,
       });
 
       // ── Write 2: workers collection (worker role only) ─────────────────────
@@ -288,10 +353,14 @@ function ProfileForm({ role, uid, onBack }) {
                 : <MapPin className="w-5 h-5" />}
             </button>
           </div>
-          {coords && (
+          {coords ? (
             <p className="flex items-center gap-1 text-xs text-green-600 mt-1.5">
               <CheckCircle className="w-3.5 h-3.5" />
-              GPS location saved
+              GPS location saved — not accurate? Edit your village above
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-1.5">
+              Tap &#128205; to auto-detect, or type your village / area manually
             </p>
           )}
         </div>

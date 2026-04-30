@@ -14,6 +14,13 @@ export const WORK_TYPE_MAP = Object.fromEntries(
 );
 
 export const calcDistance = (lat1, lon1, lat2, lon2) => {
+  lat1 = Number(lat1);
+  lon1 = Number(lon1);
+  lat2 = Number(lat2);
+  lon2 = Number(lon2);
+
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -23,6 +30,15 @@ export const calcDistance = (lat1, lon1, lat2, lon2) => {
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+export const formatDistance = (distance) => {
+  if (distance == null || !Number.isFinite(distance)) return "";
+  if (distance < 1) return "Nearby";
+
+  const speed = 40; // km/h
+  const time = (distance / speed) * 60;
+  return `${distance.toFixed(1)} km • ${Math.round(time)} min`;
 };
 
 export const formatDate = (ts) => {

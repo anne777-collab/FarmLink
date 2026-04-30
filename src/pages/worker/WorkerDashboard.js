@@ -172,7 +172,7 @@ function HomeTab({ worker, setWorker, onNavigate, pendingCount, stats, userProfi
 // ─────────────────────────────────────────────────────────────────────────────
 // PROFILE TAB
 // ─────────────────────────────────────────────────────────────────────────────
-function ProfileTab({ worker, setWorker }) {
+function ProfileTab({ worker, setWorker, stats = {} }) {
   const { userProfile, refreshProfile } = useAuth();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -235,8 +235,9 @@ function ProfileTab({ worker, setWorker }) {
             </div>
             <p className="text-xs text-gray-500 mt-0.5">Rating</p>
           </Card>
+          {/* Task 1+2: Jobs Done = completed count from live stats (accurate), not stale totalJobs scalar */}
           <Card className="text-center py-3">
-            <div className="text-xl font-black text-green-600">{worker.totalJobs ?? 0}</div>
+            <div className="text-xl font-black text-green-600">{stats?.completed ?? worker.totalJobs ?? 0}</div>
             <p className="text-xs text-gray-500 mt-0.5">Jobs Done</p>
           </Card>
           <Card className="text-center py-3">
@@ -245,6 +246,19 @@ function ProfileTab({ worker, setWorker }) {
           </Card>
         </div>
       )}
+
+      {/* Job Statistics — live counts from real-time listener */}
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 text-center">
+          <p className="text-3xl font-black text-yellow-600">{stats?.pending ?? 0}</p>
+          <p className="text-yellow-700 text-xs font-semibold mt-1">Pending Jobs</p>
+        </div>
+        {/* Task 2: "Completed Jobs" here = same as "Jobs Done" above — show Accepted instead to avoid duplication */}
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-center">
+          <p className="text-3xl font-black text-blue-600">{stats?.accepted ?? 0}</p>
+          <p className="text-blue-700 text-xs font-semibold mt-1">Active Jobs</p>
+        </div>
+      </div>
 
       {editing ? (
         <Card className="mb-4 space-y-4">
@@ -443,7 +457,7 @@ export default function WorkerDashboard() {
           />
         );
       case "profile":
-        return <ProfileTab worker={worker} setWorker={setWorker} />;
+        return <ProfileTab worker={worker} setWorker={setWorker} stats={stats} />;
       default:
         return null;
     }

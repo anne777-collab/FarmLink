@@ -16,6 +16,13 @@ const AVAIL_OPTIONS  = [
 ];
 
 const EMPTY_HIRE = { date: "", workersNeeded: 1, offeredWage: "", workType: "", workDescription: "" };
+const MAX_DISTANCE = 10; // km
+
+const getLatLng = (location) => {
+  const lat = Number(location?.lat);
+  const lng = Number(location?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+};
 
 export default function SearchWorkers() {
   const { userProfile } = useAuth();
@@ -37,6 +44,7 @@ export default function SearchWorkers() {
   const [hireLoading, setHireLoading] = useState(false);
   const [hireErrors,  setHireErrors]  = useState({});
   const [subscription, setSubscription] = useState(null);
+  const [isDistanceSorted, setIsDistanceSorted] = useState(false); // Task 3: true when workers sorted by GPS distance
 
   // ── Load subscription once ─────────────────────────────────────────────────
   useEffect(() => {
@@ -57,21 +65,35 @@ export default function SearchWorkers() {
         maxWage:      filters.maxWage      || undefined,
       });
 
-      // Attach distance if both farmer and worker have GPS coords
-      if (userProfile?.location?.lat) {
+      // Calculate distance from stored farmer/worker GPS coordinates.
+      const farmerCoords = getLatLng(userProfile?.location);
+      let distanceSorted = false;
+
+      if (farmerCoords) {
         data.forEach((w) => {
-          if (w.user?.location?.lat) {
+          const workerCoords = getLatLng(w.user?.location);
+          if (workerCoords) {
             w.distance = calcDistance(
-              userProfile.location.lat, userProfile.location.lng,
-              w.user.location.lat,      w.user.location.lng
+              farmerCoords.lat, farmerCoords.lng,
+              workerCoords.lat, workerCoords.lng
             );
           }
+          // Workers without GPS get undefined distance — sorted to the end
         });
-        // Sort by proximity
-        data.sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+
+        // Sort: workers with distance first (ascending), then no-GPS workers
+        data.sort((a, b) => {
+          const da = a.distance ?? Infinity;
+          const db = b.distance ?? Infinity;
+          return da - db;
+        });
+
+        distanceSorted = data.some((w) => w.distance !== undefined);
       }
 
       setWorkers(data);
+      setIsDistanceSorted(distanceSorted);
+
       if (data.length === 0) {
         console.info("[SearchWorkers] Query returned 0 workers with filters:", filters);
       }
@@ -99,20 +121,18 @@ export default function SearchWorkers() {
   const FREE_LIMIT = 3;
   const workerLimit = isPaid ? Infinity : FREE_LIMIT;
 
-  // Nearby filter: match if either has no location (don't exclude unfairly)
-  // or if the worker's address string contains the farmer's city/area keyword.
   const farmerArea = userProfile?.location?.address?.split(",")[0]?.trim()?.toLowerCase() || "";
+  const farmerCoords = getLatLng(userProfile?.location);
 
   const displayed = workers.filter((w) => {
     // Name search
     if (search && !w.user?.name?.toLowerCase().includes(search.toLowerCase())) return false;
-    // Nearby filter (address-based, soft match)
-    if (nearbyOnly && farmerArea) {
-      const workerArea = w.user?.location?.address?.toLowerCase() || "";
-      if (workerArea && !workerArea.includes(farmerArea) && !farmerArea.includes(workerArea.split(",")[0]?.trim())) {
-        return false;
-      }
+
+    // Nearby filter: use only GPS distance from stored lat/lng values.
+    if (nearbyOnly && farmerCoords) {
+      return w.distance != null && w.distance <= MAX_DISTANCE;
     }
+
     return true;
   });
 
@@ -266,8 +286,8 @@ export default function SearchWorkers() {
             </Button>
           </div>
 
-          {/* Nearby toggle — only useful when farmer has a location */}
-          {farmerArea && (
+          {/* Nearby toggle — only useful when farmer has GPS coordinates */}
+          {farmerCoords && (
             <button
               type="button"
               onClick={() => setNearbyOnly((v) => !v)}
@@ -276,7 +296,7 @@ export default function SearchWorkers() {
                           ${nearbyOnly
                             ? "bg-green-600 text-white border-green-600"
                             : "bg-white text-gray-600 border-gray-200 hover:border-green-400"}`}>
-              <span>&#128205; Show nearby only ({farmerArea})</span>
+              <span>&#128205; Show nearby only ({farmerArea || `${MAX_DISTANCE} km`})</span>
               <span className={`w-10 h-5 rounded-full transition-colors flex items-center px-0.5
                                ${nearbyOnly ? "bg-white/30" : "bg-gray-200"}`}>
                 <span className={`w-4 h-4 rounded-full bg-white shadow transition-transform
@@ -293,7 +313,7 @@ export default function SearchWorkers() {
           <span className="text-lg">&#128161;</span>
           <div>
             <p className="text-amber-800 text-xs font-semibold">
-              Free Plan: See up to {FREE_LIMIT} workers
+              Free Plan: See up to {FREE_LIMIT} {isDistanceSorted ? "nearest" : ""} workers
             </p>
             <p className="text-amber-600 text-xs">
               Upgrade to Pro to see all workers
@@ -359,7 +379,9 @@ export default function SearchWorkers() {
                 {lockedCount} more worker{lockedCount !== 1 ? "s" : ""} available
               </p>
               <p className="text-gray-400 text-xs mt-1 mb-3">
-                Upgrade to Pro to see all workers in your area
+                {isDistanceSorted
+                  ? `You're seeing the ${FREE_LIMIT} nearest workers. Upgrade to Pro to see all.`
+                  : "Upgrade to Pro to see all workers in your area"}
               </p>
               <button
                 type="button"

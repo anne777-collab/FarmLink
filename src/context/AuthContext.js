@@ -5,60 +5,50 @@ import {
   signInWithPopup,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,           // NEW: for Forgot Password feature
 } from "firebase/auth";
 import { auth, googleProvider } from "../firebase/config";
 import { getUser } from "../firebase/firestore";
 
+// NOTE: RecaptchaVerifier and signInWithPhoneNumber are intentionally removed.
+// Phone authentication has been replaced by Google + Email/Password login.
+
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [currentUser, setCurrentUser]   = useState(undefined); // undefined = not yet known
-  const [userProfile, setUserProfile]   = useState(null);
-  const [loading, setLoading]           = useState(true);
+  const [currentUser, setCurrentUser] = useState(undefined); // undefined = not yet resolved
+  const [userProfile, setUserProfile] = useState(null);
+  const [loading,     setLoading]     = useState(true);
 
+  // ── Auth state listener ────────────────────────────────────────────────────
+  // Must call setLoading(false) in EVERY code path — never leave it as true.
   useEffect(() => {
-    // onAuthStateChanged fires once immediately with the persisted session
-    // (or null if logged out). We MUST call setLoading(false) in every
-    // possible code path — including error cases — otherwise the app
-    // stays on the PageLoader forever.
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user ?? null);
 
       if (!user) {
-        // Logged out — no Firestore fetch needed
         setUserProfile(null);
         setLoading(false);
         return;
       }
 
-      // Logged in — fetch the Firestore profile.
-      // We do NOT make the onAuthStateChanged callback itself async because
-      // any uncaught rejection inside an async callback swallowed by Firebase
-      // will leave loading=true permanently. Use a plain Promise chain instead.
       getUser(user.uid)
         .then((profile) => {
           setUserProfile(profile ?? null);
         })
         .catch((err) => {
-          // Profile fetch failed (network error, Firestore rules, etc.)
-          // Log it but do NOT leave the app stuck — clear the profile and
-          // let AppRouter decide what to render (it will show SetupPage).
           console.error("[AuthContext] getUser failed:", err);
           setUserProfile(null);
         })
         .finally(() => {
-          // Guaranteed to run regardless of success or failure
           setLoading(false);
         });
     });
 
-    return unsubscribe; // clean up the listener on unmount
+    return unsubscribe;
   }, []);
 
-  /**
-   * Call this after saving a new profile to Firestore so AuthContext
-   * re-fetches and AppRouter re-routes to the correct dashboard.
-   */
+  // ── Refresh profile after Firestore writes ────────────────────────────────
   const refreshProfile = useCallback(async () => {
     if (!currentUser) return;
     try {
@@ -69,15 +59,13 @@ export const AuthProvider = ({ children }) => {
     }
   }, [currentUser]);
 
-  // ── Google Sign-In ───────────────────────────────────────────────────────
-  // Returns the Firebase user. AppRouter/SetupPage handles new-user routing
-  // automatically because onAuthStateChanged fires after signInWithPopup.
+  // ── Google Sign-In ─────────────────────────────────────────────────────────
   const signInWithGoogle = async () => {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   };
 
-  // ── Email / Password ─────────────────────────────────────────────────────
+  // ── Email / Password ───────────────────────────────────────────────────────
   const signUpWithEmail = async (email, password) => {
     const result = await createUserWithEmailAndPassword(auth, email, password);
     return result.user;
@@ -88,15 +76,23 @@ export const AuthProvider = ({ children }) => {
     return result.user;
   };
 
+  // ── Forgot Password ────────────────────────────────────────────────────────
+  // Sends a Firebase password-reset email. Throws on error so the caller
+  // can handle it and show a user-friendly message.
+  const resetPassword = async (email) => {
+    await sendPasswordResetEmail(auth, email.trim());
+  };
+
   const value = {
     currentUser,
     userProfile,
     loading,
     refreshProfile,
-    setUserProfile,    // escape hatch for optimistic updates
+    setUserProfile,
     signInWithGoogle,
     signUpWithEmail,
     signInWithEmail,
+    resetPassword,              // NEW: exposed for EmailAuthForm → Forgot Password
   };
 
   return (
