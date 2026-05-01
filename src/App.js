@@ -61,21 +61,27 @@ function AppRouter() {
 export default function App() {
   return (
     <AuthProvider>
-      <Toaster
-        position="top-center"
-        toastOptions={{
-          duration: 3500,
-          style: {
-            borderRadius: "12px",
-            fontWeight: "600",
-            fontSize: "14px",
-            maxWidth: "340px",
-          },
-          success: { style: { background: "#16a34a", color: "#fff" } },
-          error:   { style: { background: "#dc2626", color: "#fff" } },
-        }}
-      />
-      <AppRouter />
+      <div style={{ paddingTop: "max(env(safe-area-inset-top), 24px)" }}>
+        <Toaster
+          position="top-center"
+          containerStyle={{
+            top: "calc(env(safe-area-inset-top) + 10px)",
+            zIndex: 9999,
+          }}
+          toastOptions={{
+            duration: 3500,
+            style: {
+              borderRadius: "12px",
+              fontWeight: "600",
+              fontSize: "14px",
+              maxWidth: "90%",
+            },
+            success: { style: { background: "#16a34a", color: "#fff" } },
+            error:   { style: { background: "#dc2626", color: "#fff" } },
+          }}
+        />
+        <AppRouter />
+      </div>
     </AuthProvider>
   );
 }

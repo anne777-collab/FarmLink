@@ -4,11 +4,16 @@
 
 @layer base {
   * {
+    box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
+    transition: all 0.2s ease;
   }
   body {
+    margin: 0;
+    padding: 0;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     background-color: #f9fafb;
+    overflow-x: hidden;
     overscroll-behavior-y: contain;
   }
 }
@@ -19,6 +24,93 @@
   }
   .border-3 {
     border-width: 3px;
+  }
+  .animate-page-enter {
+    animation: page-enter 0.3s ease both;
+  }
+  .animate-location-pulse {
+    animation: pulse 1s ease-in-out infinite;
+  }
+  .animate-shake {
+    animation: shake 0.28s ease;
+  }
+  .animate-success-banner {
+    animation: success-banner 2s ease forwards;
+  }
+  .safe-fixed-banner {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 10px);
+    left: 50%;
+    z-index: 9999;
+    max-width: 90%;
+    width: max-content;
+    transform: translateX(-50%);
+  }
+  .app-spinner {
+    width: 18px;
+    height: 18px;
+    border: 3px solid #eee;
+    border-top: 3px solid #22c55e;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes success-banner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+  12%, 82% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -12px);
   }
 }
 

@@ -3,54 +3,54 @@ import React from "react";
 import { Loader2 } from "lucide-react";
 
 export const Button = ({ children, onClick, variant = "primary", size = "md", disabled, loading, className = "", type = "button" }) => {
-  const base = "inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
+  const base = "relative inline-flex items-center justify-center gap-2 overflow-hidden font-semibold transition-all duration-150 ease-in-out active:scale-[0.96] active:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100";
   const variants = {
-    primary: "bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-200",
+    primary: "bg-gradient-to-br from-green-500 to-green-600 hover:from-green-500 hover:to-green-700 text-white shadow-[0_6px_15px_rgba(34,197,94,0.3)]",
     secondary: "bg-white hover:bg-green-50 text-green-700 border-2 border-green-200",
     danger: "bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-200",
     ghost: "bg-transparent hover:bg-green-50 text-green-700",
     orange: "bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200",
   };
   const sizes = {
-    sm: "px-3 py-2 text-sm",
-    md: "px-5 py-3 text-base",
-    lg: "px-6 py-4 text-lg w-full",
+    sm: "h-10 px-3 text-sm rounded-xl",
+    md: "h-12 px-5 text-sm rounded-xl",
+    lg: "h-[52px] px-6 text-base rounded-[14px] w-full",
   };
   return (
     <button type={type} onClick={onClick} disabled={disabled || loading}
       className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}>
-      {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+      {loading && <span className="app-spinner" />}
       {children}
     </button>
   );
 };
 
 export const Input = ({ label, error, className = "", ...props }) => (
-  <div className="flex flex-col gap-1 w-full">
-    {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
+  <div className="flex flex-col w-full">
+    {label && <label className="mb-1.5 text-[13px] font-medium text-gray-700">{label}</label>}
     <input
-      className={`w-full px-4 py-3 rounded-xl border-2 text-base outline-none transition-all
-        ${error ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-green-400 bg-white"}
+      className={`h-[50px] w-full rounded-xl border px-3.5 text-sm outline-none transition-all duration-200 ease-in-out placeholder:text-gray-400
+        ${error ? "animate-shake border-red-400 bg-red-50" : "border-gray-200 bg-white focus:border-green-500 focus:shadow-[0_0_0_3px_rgba(34,197,94,0.2)]"}
         ${className}`}
       {...props}
     />
-    {error && <p className="text-xs text-red-500">{error}</p>}
+    {error && <p className="mt-1.5 text-xs text-red-500">{error}</p>}
   </div>
 );
 
 export const Select = ({ label, error, options = [], className = "", ...props }) => (
-  <div className="flex flex-col gap-1 w-full">
-    {label && <label className="text-sm font-medium text-gray-700">{label}</label>}
+  <div className="flex flex-col w-full">
+    {label && <label className="mb-1.5 text-[13px] font-medium text-gray-700">{label}</label>}
     <select
-      className={`w-full px-4 py-3 rounded-xl border-2 text-base outline-none transition-all appearance-none bg-white
-        ${error ? "border-red-400" : "border-gray-200 focus:border-green-400"}
+      className={`h-[50px] w-full rounded-xl border px-3.5 text-sm outline-none transition-all duration-200 ease-in-out appearance-none bg-white
+        ${error ? "animate-shake border-red-400" : "border-gray-200 focus:border-green-500 focus:shadow-[0_0_0_3px_rgba(34,197,94,0.2)]"}
         ${className}`}
       {...props}>
       {options.map((o) => (
         <option key={o.value} value={o.value}>{o.label}</option>
       ))}
     </select>
-    {error && <p className="text-xs text-red-500">{error}</p>}
+    {error && <p className="mt-1.5 text-xs text-red-500">{error}</p>}
   </div>
 );
 

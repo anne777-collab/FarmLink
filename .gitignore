@@ -1,4 +1,21 @@
+# React
 node_modules/
 build/
-.env
 .cache/
+
+# Env
+.env
+
+# Android / Capacitor
+.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# IDE files
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db

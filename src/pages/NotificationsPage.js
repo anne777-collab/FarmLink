@@ -64,7 +64,7 @@ export default function NotificationsPage({ onBack }) {
   return (
     <div className="min-h-screen bg-gray-50 max-w-md mx-auto">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
+      <div className="bg-white border-b border-gray-200 px-4 py-4 flex items-center justify-between sticky top-[max(env(safe-area-inset-top),24px)] z-10">
         <div className="flex items-center gap-3">
           {onBack && (
             <button type="button" onClick={onBack}
