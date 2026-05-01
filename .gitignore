@@ -19,3 +19,5 @@ android/local.properties
 # OS files
 .DS_Store
 Thumbs.db
+
+android/app/google-services.json
