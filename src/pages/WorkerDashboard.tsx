@@ -4,6 +4,7 @@ import { useApp } from "../context/AppContext";
 import { Toast } from "../components/Toast";
 import { JobStatusBadge, JobTimeline } from "../components/JobTimeline";
 import { RatingModal } from "../components/RatingModal";
+import { rankJobsForWorker } from "../services/marketplaceIntelligence";
 import { 
   IndianRupee, Briefcase, MapPin, RefreshCw, 
   CheckCircle, XCircle, Bell, Check, AlertCircle, Send, Play, Star
@@ -30,6 +31,10 @@ export const WorkerDashboard: React.FC = () => {
   const pendingRequests = myRequests.filter(req => req.status === "pending");
   const acceptedRequests = myRequests.filter(req => req.status === "accepted");
   const nearbyJobs = getNearbyJobs();
+  const recommendedJobs = rankJobsForWorker(
+    nearbyJobs.filter(job => !jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid)),
+    user
+  );
   const workflowJobs = jobs.filter(job => job.workerId === user.uid || jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid));
   const activeWorkflowJobs = workflowJobs.filter(job => !["completed", "rated", "cancelled"].includes(job.status));
   const completedWorkflowJobs = workflowJobs.filter(job => ["completed", "rated"].includes(job.status));
@@ -277,7 +282,7 @@ export const WorkerDashboard: React.FC = () => {
 
             <div className="space-y-4">
               <h3 className="text-sm font-black uppercase tracking-wider text-slate-400">Apply To Nearby Jobs</h3>
-              {nearbyJobs.filter(job => !jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid)).length === 0 ? (
+              {recommendedJobs.length === 0 ? (
                 <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center dark:border-slate-800 dark:bg-slate-900">
                   <Briefcase className="mx-auto h-8 w-8 text-slate-300" />
                   <h3 className="mt-3 text-sm font-black text-slate-900 dark:text-white">No nearby posted jobs yet.</h3>
@@ -285,15 +290,22 @@ export const WorkerDashboard: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
-                  {nearbyJobs
-                    .filter(job => !jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid))
-                    .map((job) => (
+                  {recommendedJobs
+                    .map(({ job, score, reasons }) => (
                       <div key={job.id} className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <h3 className="font-black text-slate-900 dark:text-white">{job.workType}</h3>
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <h3 className="font-black text-slate-900 dark:text-white">{job.workType}</h3>
+                              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300">{score}/100 AI match</span>
+                            </div>
                             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{job.description || job.notes}</p>
                             <p className="mt-2 text-[10px] font-bold text-slate-400">{job.farmerName} • {job.village} • {(job as any).distance?.toFixed?.(1) ?? "0.0"} km away</p>
+                            <div className="mt-3 flex flex-wrap gap-1">
+                              {reasons.map(reason => (
+                                <span key={reason} className="rounded-full bg-slate-50 px-2 py-1 text-[9px] font-black text-slate-600 dark:bg-slate-950 dark:text-slate-300">{reason}</span>
+                              ))}
+                            </div>
                           </div>
                           <p className="text-lg font-black text-emerald-600">₹{job.wage}</p>
                         </div>

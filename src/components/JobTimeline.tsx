@@ -1,5 +1,6 @@
 import React from "react";
 import { CheckCircle, Circle, Clock } from "lucide-react";
+import { motion } from "framer-motion";
 import { JobStatus } from "../context/AppContext";
 
 const steps: Array<{ status: JobStatus; label: string }> = [
@@ -29,8 +30,11 @@ export const JobTimeline: React.FC<{ status: JobStatus; compact?: boolean }> = (
         const complete = index < activeIndex;
         const current = index === activeIndex;
         return (
-          <div
+          <motion.div
             key={step.status}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.04, duration: 0.22 }}
             className={`relative rounded-2xl border p-3 text-center transition-all ${
               complete
                 ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300"
@@ -39,11 +43,19 @@ export const JobTimeline: React.FC<{ status: JobStatus; compact?: boolean }> = (
                   : "border-slate-100 bg-slate-50 text-slate-400 dark:border-slate-800 dark:bg-slate-950/40"
             }`}
           >
-            <div className="mx-auto mb-1 flex h-6 w-6 items-center justify-center">
+            {current && (
+              <motion.span
+                layoutId="job-timeline-active"
+                className="absolute inset-0 rounded-2xl ring-2 ring-amber-300/60"
+                animate={{ opacity: [0.35, 0.8, 0.35] }}
+                transition={{ duration: 1.8, repeat: Infinity }}
+              />
+            )}
+            <div className="relative mx-auto mb-1 flex h-6 w-6 items-center justify-center">
               {complete ? <CheckCircle className="h-5 w-5" /> : current ? <Clock className="h-5 w-5 animate-pulse" /> : <Circle className="h-5 w-5" />}
             </div>
-            <span className="text-[10px] font-black uppercase tracking-wide">{step.label}</span>
-          </div>
+            <span className="relative text-[10px] font-black uppercase tracking-wide">{step.label}</span>
+          </motion.div>
         );
       })}
     </div>

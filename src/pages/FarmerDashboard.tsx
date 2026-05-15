@@ -6,6 +6,8 @@ import { Toast } from "../components/Toast";
 import { ProfileAvatar } from "../components/ProfileAvatar";
 import { JobStatusBadge, JobTimeline } from "../components/JobTimeline";
 import { RatingModal } from "../components/RatingModal";
+import { TrustBadges } from "../components/TrustBadges";
+import { buildTrustProfile, rankWorkersForJob } from "../services/marketplaceIntelligence";
 import { 
   MapPin, Search, Bookmark, Lock, 
   Sparkles, RefreshCw, Phone, MessageSquare, Plus, 
@@ -53,9 +55,23 @@ export const FarmerDashboard: React.FC = () => {
   // Active jobs created by this farmer
   const myJobs = jobs.filter(j => j.farmerId === user.uid);
   const ratingJob = ratingJobId ? myJobs.find(job => job.id === ratingJobId) : null;
-
   // Fallback to select first job for hiring purposes if not selected
   const activeHiringJobId = selectedJobId || (myJobs.length > 0 ? myJobs[0].id : "");
+  const completedJobsByWorker = jobs.reduce<Record<string, number>>((acc, job) => {
+    if (job.workerId && ["completed", "rated"].includes(job.status)) {
+      acc[job.workerId] = (acc[job.workerId] || 0) + 1;
+    }
+    return acc;
+  }, {});
+  const selectedJob = jobs.find(job => job.id === activeHiringJobId);
+  const visibleWorkerCandidates = user.isPremium ? filteredWorkers : filteredWorkers.slice(0, 3);
+  const bestMatches = rankWorkersForJob(
+    visibleWorkerCandidates,
+    ratings,
+    completedJobsByWorker,
+    skillFilter,
+    selectedJob?.wage || selectedJob?.wageOffered
+  ).slice(0, 3);
 
   const handleRefreshLocation = async () => {
     setRefreshingLocation(true);
@@ -294,9 +310,42 @@ export const FarmerDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-4">
+                {bestMatches.length > 0 && (
+                  <div className="rounded-[2rem] border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-lime-50 p-5 shadow-sm dark:border-emerald-900/30 dark:from-emerald-950/20 dark:via-slate-900 dark:to-lime-950/10">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Best Match Workers</p>
+                        <h3 className="text-xl font-black text-slate-900 dark:text-white">AI-powered recommendations</h3>
+                      </div>
+                      <Sparkles className="h-6 w-6 text-emerald-500" />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                      {bestMatches.map(match => (
+                        <div key={match.worker.uid} className="rounded-3xl border border-white bg-white/90 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+                          <div className="mb-3 flex items-center gap-3">
+                            <ProfileAvatar name={match.worker.fullName} role="worker" src={match.worker.profilePhoto || match.worker.photoURL} size="sm" />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-black text-slate-900 dark:text-white">{match.worker.fullName}</p>
+                              <p className="text-[10px] font-bold text-emerald-600">{match.score}/100 match</p>
+                            </div>
+                          </div>
+                          <div className="mb-3 h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                            <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-lime-500" style={{ width: `${match.score}%` }} />
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {match.reasons.map(reason => (
+                              <span key={reason} className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">{reason}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {filteredWorkers.map((worker, index) => {
                   // Freemium Restriction: index >= 3 is premium lock if user is not premium
                   const isLocked = !user.isPremium && index >= 3;
+                  const trust = buildTrustProfile(worker.uid, ratings, completedJobsByWorker[worker.uid] || 0);
 
                   return (
                     <div 
@@ -359,6 +408,8 @@ export const FarmerDashboard: React.FC = () => {
                             </span>
                           ))}
                         </div>
+
+                        <TrustBadges trust={trust} compact />
 
                         {/* Bottom Row Details: Wage & Connect buttons */}
                         <div className="border-t border-slate-100 dark:border-slate-800/80 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

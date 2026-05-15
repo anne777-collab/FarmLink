@@ -8,6 +8,8 @@ import { AppProvider, useApp } from "./context/AppContext";
 import { Navbar } from "./components/Navbar";
 import { Footer } from "./components/Footer";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { PWAInstallPrompt } from "./components/PWAInstallPrompt";
+import { LiveNotificationToast } from "./components/LiveNotificationToast";
 
 // Page Components
 import { LandingPage } from "./pages/LandingPage";
@@ -144,6 +146,8 @@ export default function App() {
 
               {/* Dynamic Footer */}
               <Footer />
+              <PWAInstallPrompt />
+              <LiveNotificationToast />
 
             </div>
           </BrowserRouter>

@@ -4,12 +4,14 @@ import { useLanguage } from "../context/LanguageContext";
 import { useApp } from "../context/AppContext";
 import { Toast } from "../components/Toast";
 import { ProfileAvatar } from "../components/ProfileAvatar";
+import { TrustBadges } from "../components/TrustBadges";
+import { buildTrustProfile } from "../services/marketplaceIntelligence";
 import { ArrowLeft, MapPin, IndianRupee, ShieldCheck, Phone, MessageSquare, Briefcase, Award, RefreshCw, Star } from "lucide-react";
 
 export const WorkerProfilePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { t } = useLanguage();
-  const { workers, user, refreshUserLocation, getWorkerStats } = useApp();
+  const { workers, user, refreshUserLocation, getWorkerStats, ratings } = useApp();
   const navigate = useNavigate();
   const [refreshingLocation, setRefreshingLocation] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -26,6 +28,7 @@ export const WorkerProfilePage: React.FC = () => {
   const displayLastUpdated = workerLocation?.lastUpdated || worker?.lastUpdated;
   const canRefreshOwnLocation = !!user && user.uid === worker?.uid;
   const stats = worker ? getWorkerStats(worker.uid) : { averageRating: 0, jobsCompleted: 0, totalReviews: 0 };
+  const trust = worker ? buildTrustProfile(worker.uid, ratings, stats.jobsCompleted) : null;
 
   const handleRefreshLocation = async () => {
     setRefreshingLocation(true);
@@ -193,6 +196,8 @@ export const WorkerProfilePage: React.FC = () => {
               <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Reviews</p>
             </div>
           </div>
+
+          {trust && <TrustBadges trust={trust} />}
 
           {/* Special Skills Checklist */}
           <div className="space-y-3">
