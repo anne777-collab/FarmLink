@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { LiveLocation, LocationRecord, calculateDistance, acquireLiveLocation } from "../utils/location";
 import { signInWithGooglePopupSafe } from "../services/googleAuth";
+import { cleanFirestoreData } from "../utils/firestoreData";
 
 // Interface Definitions
 export interface UserProfile {
@@ -58,6 +59,7 @@ export type NotificationType = "info" | "success" | "warning" | "job_posted" | "
 
 export interface JobPost {
   id: string;
+  type?: "direct" | "emergency" | "marketplace";
   farmerId: string;
   farmerName: string;
   farmerMobile?: string;
@@ -72,6 +74,10 @@ export interface JobPost {
     village: string;
     district: string;
     state: string;
+    latitude: number;
+    longitude: number;
+  };
+  coordinates?: {
     latitude: number;
     longitude: number;
   };
@@ -188,6 +194,9 @@ interface AppContextType {
     dateTime?: string;
     notes?: string;
     additionalNotes?: string;
+    type?: "direct" | "emergency" | "marketplace";
+    workerId?: string;
+    workerName?: string;
   }) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
   acceptJobApplication: (applicationId: string) => Promise<void>;
@@ -296,6 +305,7 @@ const normalizeJobPost = (raw: Partial<JobPost>): JobPost => {
 
   return {
     id: raw.id ?? "",
+    type: raw.type ?? "marketplace",
     farmerId: raw.farmerId ?? "",
     farmerName: raw.farmerName ?? "",
     farmerMobile: raw.farmerMobile ?? "",
@@ -307,6 +317,10 @@ const normalizeJobPost = (raw: Partial<JobPost>): JobPost => {
     wage,
     workersNeeded: raw.workersNeeded ?? 1,
     location,
+    coordinates: raw.coordinates ?? {
+      latitude: raw.latitude ?? location.latitude,
+      longitude: raw.longitude ?? location.longitude,
+    },
     workDate,
     workTime: raw.workTime ?? "",
     status: status as JobStatus,
@@ -581,7 +595,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 photoURL: fbUser.photoURL || "",
                 profilePhoto: fbUser.photoURL || "",
               };
-              await setDoc(authDocRef, getAuthRecord(googleUser), { merge: true });
+              await setDoc(authDocRef, cleanFirestoreData(getAuthRecord(googleUser)), { merge: true });
               sessionStorage.removeItem("farmlink_pending_google_role");
               setUser(googleUser);
             }
@@ -629,7 +643,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           longitude: 76.6155,
           profileCompleted: false,
         };
-        await setDoc(doc(realDb, USERS_COLLECTION, credentials.user.uid), getAuthRecord(newUser));
+        await setDoc(doc(realDb, USERS_COLLECTION, credentials.user.uid), cleanFirestoreData(getAuthRecord(newUser)));
         console.debug("[FarmLink][Firestore] created auth user", {
           path: `${USERS_COLLECTION}/${credentials.user.uid}`,
           role,
@@ -755,7 +769,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             photoURL: fbUser.photoURL || "",
             profilePhoto: fbUser.photoURL || "",
           };
-          await setDoc(docRef, getAuthRecord(newUser), { merge: true });
+          await setDoc(docRef, cleanFirestoreData(getAuthRecord(newUser)), { merge: true });
           console.debug("[FarmLink][Firestore] created google auth user", {
             path: `${USERS_COLLECTION}/${fbUser.uid}`,
             role,
@@ -835,8 +849,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           profilePath: `${profileCollection}/${user.uid}`,
           role: user.role,
         });
-        await setDoc(doc(realDb, USERS_COLLECTION, user.uid), authRecord, { merge: true });
-        await setDoc(doc(realDb, profileCollection, user.uid), profilePayload, { merge: true });
+        await setDoc(doc(realDb, USERS_COLLECTION, user.uid), cleanFirestoreData(authRecord), { merge: true });
+        await setDoc(doc(realDb, profileCollection, user.uid), cleanFirestoreData(profilePayload), { merge: true });
         setUser(updatedUser);
       } catch (err: any) {
         setLoading(false);
@@ -907,7 +921,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         profilePath: `${roleCollection}/${user.uid}`,
         role: user.role,
       });
-      await setDoc(doc(realDb, roleCollection, user.uid), {
+      await setDoc(doc(realDb, roleCollection, user.uid), cleanFirestoreData({
         location: locationPayload,
         village: nextLocation.village,
         district: nextLocation.district,
@@ -916,7 +930,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         latitude: nextLocation.latitude,
         longitude: nextLocation.longitude,
         lastUpdated: nextLocation.lastUpdated,
-      }, { merge: true });
+      }), { merge: true });
     } else {
       setSimUsers(prev => ({
         ...prev,
@@ -985,6 +999,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     dateTime?: string;
     notes?: string;
     additionalNotes?: string;
+    type?: "direct" | "emergency" | "marketplace";
+    workerId?: string;
+    workerName?: string;
   }) => {
     if (!user) throw new Error("Must be logged in.");
     if (user.role !== "farmer") throw new Error("Only farmers can post jobs.");
@@ -993,11 +1010,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const wage = Number(jobData.wage ?? jobData.wageOffered ?? 0);
     const workDate = jobData.workDate ?? jobData.dateTime ?? "";
     const notes = jobData.additionalNotes ?? jobData.notes ?? "";
+    const jobType = jobData.type ?? "emergency";
     const newJob: JobPost = normalizeJobPost({
       id,
+      type: jobType,
       farmerId: user.uid,
       farmerName: user.fullName || "A Farmer",
       farmerMobile: user.mobileNum || "",
+      workerId: jobData.workerId,
+      workerName: jobData.workerName,
       title: jobData.title || `${jobData.workType} needed`,
       workType: jobData.workType,
       description: jobData.description || notes,
@@ -1007,6 +1028,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         village: jobData.village,
         district: jobData.district,
         state: jobData.state,
+        latitude: jobData.latitude,
+        longitude: jobData.longitude,
+      },
+      coordinates: {
         latitude: jobData.latitude,
         longitude: jobData.longitude,
       },
@@ -1029,20 +1054,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, JOBS_COLLECTION, id), newJob);
+      await setDoc(doc(realDb, JOBS_COLLECTION, id), cleanFirestoreData(newJob));
     } else {
       setSimJobs(prev => [newJob, ...prev]);
     }
 
-    // Automatically trigger notification creation for nearby workers
-    // In our simulated or real database, find workers in same district/village
-    const nearbyWorkers = workers.filter(w => w.district === user.district || w.pincode === user.pincode);
-    for (const worker of nearbyWorkers) {
+    if (jobType === "direct" && jobData.workerId) {
+      await addNotification(
+        jobData.workerId,
+        `${user.fullName || "A farmer"} sent you a direct hiring request for ${jobData.workType} at ₹${wage}/day.`,
+        "job_posted",
+        "Direct hiring request"
+      );
+      return;
+    }
+
+    const matchedWorkers = workers
+      .map(worker => ({
+        worker,
+        distance: calculateDistance(
+          resolveLatitude(user),
+          resolveLongitude(user),
+          resolveLatitude(worker),
+          resolveLongitude(worker)
+        ),
+      }))
+      .filter(({ worker, distance }) => {
+        const isAvailable = worker.availability !== "Busy / Booked";
+        const nearby = distance <= 50 || worker.district === user.district || worker.pincode === user.pincode;
+        const skillMatch = !worker.skills?.length || worker.skills.includes(jobData.workType);
+        return isAvailable && nearby && skillMatch;
+      })
+      .sort((a, b) => a.distance - b.distance);
+
+    const recipients = user.isPremium ? matchedWorkers : matchedWorkers.slice(0, 3);
+    for (const { worker } of recipients) {
       await addNotification(
         worker.uid,
-        `New ${jobData.workType} job in ${jobData.village} offers ₹${wage}/day.`,
+        `Emergency ${jobData.workType} job near ${jobData.village} offers ₹${wage}/day. Apply quickly if available.`,
         "job_posted",
-        "New job posted"
+        "Emergency hiring nearby"
       );
     }
   };
@@ -1052,7 +1103,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updatedWorker = target ? { ...target, availability } : undefined;
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, WORKERS_COLLECTION, workerId), { availability }, { merge: true });
+      await setDoc(doc(realDb, WORKERS_COLLECTION, workerId), cleanFirestoreData({ availability }), { merge: true });
     } else if (updatedWorker) {
       setSimUsers(prev => ({ ...prev, [workerId]: updatedWorker }));
       if (user?.uid === workerId) {
@@ -1088,8 +1139,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nextJob = normalizeJobPost({ ...job, status: job.status === "posted" ? "applied" : job.status, updatedAt: now });
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, APPLICATIONS_COLLECTION, id), application);
-      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), { status: nextJob.status, updatedAt: now }, { merge: true });
+      await setDoc(doc(realDb, APPLICATIONS_COLLECTION, id), cleanFirestoreData(application));
+      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), cleanFirestoreData({ status: nextJob.status, updatedAt: now }), { merge: true });
     } else {
       setSimApplications(prev => [application, ...prev]);
       setSimJobs(prev => prev.map(item => item.id === jobId ? nextJob : item));
@@ -1122,8 +1173,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updatedJob = normalizeJobPost({ ...job, ...jobPatch });
 
     if (isFirebaseConfigured) {
-      await updateDoc(doc(realDb, APPLICATIONS_COLLECTION, applicationId), { status: "accepted" });
-      await setDoc(doc(realDb, JOBS_COLLECTION, job.id), jobPatch, { merge: true });
+      await updateDoc(doc(realDb, APPLICATIONS_COLLECTION, applicationId), cleanFirestoreData({ status: "accepted" }));
+      await setDoc(doc(realDb, JOBS_COLLECTION, job.id), cleanFirestoreData(jobPatch), { merge: true });
     } else {
       setSimApplications(prev => prev.map(app => app.id === applicationId ? { ...app, status: "accepted" } : app.jobId === job.id ? { ...app, status: "rejected" } : app));
       setSimJobs(prev => prev.map(item => item.id === job.id ? updatedJob : item));
@@ -1141,7 +1192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!job || job.farmerId !== user.uid) throw new Error("You can only manage your own jobs.");
 
     if (isFirebaseConfigured) {
-      await updateDoc(doc(realDb, APPLICATIONS_COLLECTION, applicationId), { status: "rejected" });
+      await updateDoc(doc(realDb, APPLICATIONS_COLLECTION, applicationId), cleanFirestoreData({ status: "rejected" }));
     } else {
       setSimApplications(prev => prev.map(app => app.id === applicationId ? { ...app, status: "rejected" } : app));
     }
@@ -1157,7 +1208,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const isFarmerOwner = user.role === "farmer" && job.farmerId === user.uid;
     const isAssignedWorker = user.role === "worker" && job.workerId === user.uid;
     if (!isFarmerOwner && !isAssignedWorker) throw new Error("You are not allowed to update this job.");
-    if (nextStatus !== "cancelled" && !canMoveJobStatus(job.status, nextStatus)) {
+    const isDirectAcceptance = job.type === "direct" && job.status === "posted" && nextStatus === "accepted" && isAssignedWorker;
+    if (nextStatus !== "cancelled" && !isDirectAcceptance && !canMoveJobStatus(job.status, nextStatus)) {
       throw new Error(`Invalid workflow transition: ${job.status} to ${nextStatus}.`);
     }
     if (nextStatus === "in_progress" && !isAssignedWorker && !isFarmerOwner) throw new Error("Only the assigned job participants can start work.");
@@ -1170,13 +1222,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const updatedJob = normalizeJobPost({ ...job, ...patch });
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), patch, { merge: true });
+      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), cleanFirestoreData(patch), { merge: true });
     } else {
       setSimJobs(prev => prev.map(item => item.id === jobId ? updatedJob : item));
     }
 
     if (nextStatus === "completed" && job.workerId) {
       await setWorkerAvailability(job.workerId, "Available Today");
+    }
+    if (nextStatus === "accepted" && job.workerId) {
+      await setWorkerAvailability(job.workerId, "Busy / Booked");
     }
 
     const notifyUserId = user.uid === job.farmerId ? job.workerId : job.farmerId;
@@ -1212,8 +1267,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const jobPatch = { status: "rated" as JobStatus, ratingGiven: true, updatedAt: now };
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, RATINGS_COLLECTION, id), newRating);
-      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), jobPatch, { merge: true });
+      await setDoc(doc(realDb, RATINGS_COLLECTION, id), cleanFirestoreData(newRating));
+      await setDoc(doc(realDb, JOBS_COLLECTION, jobId), cleanFirestoreData(jobPatch), { merge: true });
     } else {
       setSimRatings(prev => [newRating, ...prev]);
       setSimJobs(prev => prev.map(item => item.id === jobId ? normalizeJobPost({ ...item, ...jobPatch }) : item));
@@ -1249,7 +1304,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const updatedUser = { ...user, savedWorkers: updated };
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, FARMERS_COLLECTION, user.uid), { savedWorkers: updated }, { merge: true });
+      await setDoc(doc(realDb, FARMERS_COLLECTION, user.uid), cleanFirestoreData({ savedWorkers: updated }), { merge: true });
     } else {
       setSimUsers(prev => ({ ...prev, [user.uid]: updatedUser }));
     }
@@ -1280,7 +1335,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, "requests", id), newRequest);
+      await setDoc(doc(realDb, "requests", id), cleanFirestoreData(newRequest));
     } else {
       setSimRequests(prev => [newRequest, ...prev]);
     }
@@ -1302,7 +1357,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateRequestStatus = async (requestId: string, status: "accepted" | "declined") => {
     if (isFirebaseConfigured) {
-      await updateDoc(doc(realDb, "requests", requestId), { status });
+      await updateDoc(doc(realDb, "requests", requestId), cleanFirestoreData({ status }));
     } else {
       setSimRequests(prev => prev.map(r => r.id === requestId ? { ...r, status } : r));
     }
@@ -1331,7 +1386,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, NOTIFICATIONS_COLLECTION, id), newNotif);
+      await setDoc(doc(realDb, NOTIFICATIONS_COLLECTION, id), cleanFirestoreData(newNotif));
     } else {
       setSimNotifications(prev => [newNotif, ...prev]);
     }
@@ -1345,7 +1400,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         where("userId", "==", user.uid),
         where("read", "==", false)
       ));
-      await Promise.all(unread.docs.map((docSnap) => updateDoc(doc(realDb, NOTIFICATIONS_COLLECTION, docSnap.id), { read: true })));
+      await Promise.all(unread.docs.map((docSnap) => updateDoc(doc(realDb, NOTIFICATIONS_COLLECTION, docSnap.id), cleanFirestoreData({ read: true }))));
     } else {
       setSimNotifications(prev => prev.map(n => n.userId === user.uid ? { ...n, read: true } : n));
     }

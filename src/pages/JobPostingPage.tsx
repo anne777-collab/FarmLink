@@ -1,20 +1,26 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLanguage } from "../context/LanguageContext";
 import { useApp } from "../context/AppContext";
 import { Toast } from "../components/Toast";
-import { Sprout, IndianRupee, Calendar, Users, AlertCircle, CheckCircle, ArrowLeft, Clock, MapPin, FileText } from "lucide-react";
+import { TimePicker, formatDisplayTime } from "../components/TimePicker";
+import { ProfileAvatar } from "../components/ProfileAvatar";
+import { IndianRupee, Calendar, Users, AlertCircle, CheckCircle, ArrowLeft, MapPin, FileText, Siren, Send } from "lucide-react";
 
 export const JobPostingPage: React.FC = () => {
   const { t } = useLanguage();
-  const { user, postNewJob } = useApp();
+  const { user, workers, postNewJob } = useApp();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const directWorkerId = searchParams.get("workerId") || "";
+  const selectedWorker = workers.find(worker => worker.uid === directWorkerId);
+  const isDirectHiring = !!selectedWorker;
 
   const [workType, setWorkType] = useState("Wheat Cutting");
-  const [workersNeeded, setWorkersNeeded] = useState<number>(3);
+  const [workersNeeded, setWorkersNeeded] = useState<number>(isDirectHiring ? 1 : 3);
   const [wageOffered, setWageOffered] = useState<number>(450);
   const [dateOfWork, setDateOfWork] = useState("");
-  const [workTime, setWorkTime] = useState("");
+  const [workTime, setWorkTime] = useState("06:00");
   const [description, setDescription] = useState("");
   const [village, setVillage] = useState(user?.village || "");
   const [district, setDistrict] = useState(user?.district || "");
@@ -46,10 +52,13 @@ export const JobPostingPage: React.FC = () => {
 
     try {
       await postNewJob({
-        title: `${workType} workers needed`,
+        type: isDirectHiring ? "direct" : "emergency",
+        workerId: selectedWorker?.uid,
+        workerName: selectedWorker?.fullName,
+        title: isDirectHiring ? `Direct request for ${selectedWorker.fullName}` : `Emergency ${workType} workers needed`,
         workType,
         description: description.trim(),
-        workersNeeded: Number(workersNeeded),
+        workersNeeded: isDirectHiring ? 1 : Number(workersNeeded),
         wage: Number(wageOffered),
         wageOffered: Number(wageOffered),
         village: village.trim(),
@@ -66,13 +75,15 @@ export const JobPostingPage: React.FC = () => {
       });
 
       setToast({
-        message: "Work request posted. Nearby workers can now apply in real time.",
+        message: isDirectHiring
+          ? "Direct hiring request sent to the selected worker."
+          : "Emergency job posted. Matching nearby workers are being notified.",
         type: "success"
       });
 
       // Navigate back after small delay
       setTimeout(() => {
-        navigate("/farmer-dashboard");
+        navigate(isDirectHiring ? `/worker-profile/${selectedWorker.uid}` : "/farmer-dashboard");
       }, 1500);
 
     } catch (err: any) {
@@ -104,18 +115,42 @@ export const JobPostingPage: React.FC = () => {
           
           <div className="space-y-1">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white flex items-center space-x-2">
-              <Sprout className="h-6 w-6 text-emerald-600" />
-              <span>{t("postJobTitle")}</span>
+              {isDirectHiring ? <Send className="h-6 w-6 text-emerald-600" /> : <Siren className="h-6 w-6 text-orange-600" />}
+              <span>{isDirectHiring ? "Send Direct Hiring Request" : "Emergency Hiring"}</span>
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {t("postJobSub")}
+              {isDirectHiring
+                ? "Fill work details and send this request only to the selected worker."
+                : "Need workers today? Notify available nearby matching workers instantly."}
             </p>
           </div>
 
-          <div className="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-lime-50 p-5 text-xs text-emerald-900 dark:border-emerald-900/30 dark:from-emerald-950/20 dark:to-lime-950/10 dark:text-emerald-200">
-            <p className="font-black uppercase tracking-wider">Professional job lifecycle</p>
-            <p className="mt-1 text-emerald-800/80 dark:text-emerald-200/70">After posting, workers apply, you review applications, accept one worker, track start/completion, and rate after the job is done.</p>
+          <div className={`rounded-3xl border p-5 text-xs ${
+            isDirectHiring
+              ? "border-emerald-100 bg-gradient-to-br from-emerald-50 to-lime-50 text-emerald-900 dark:border-emerald-900/30 dark:from-emerald-950/20 dark:to-lime-950/10 dark:text-emerald-200"
+              : "border-orange-100 bg-gradient-to-br from-orange-50 to-amber-50 text-orange-900 dark:border-orange-900/30 dark:from-orange-950/20 dark:to-amber-950/10 dark:text-orange-200"
+          }`}>
+            <p className="font-black uppercase tracking-wider">
+              {isDirectHiring ? "Direct hiring flow" : "Emergency Hiring"}
+            </p>
+            <p className="mt-1 opacity-80">
+              {isDirectHiring
+                ? "Only this worker receives the notification. They can accept or reject in real time."
+                : user.isPremium
+                  ? "Premium plan: all available nearby matching workers will be notified."
+                  : "Free plan: only the nearest 3 available matching workers will be notified."}
+            </p>
           </div>
+
+          {selectedWorker && (
+            <div className="flex items-center gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <ProfileAvatar name={selectedWorker.fullName} role="worker" src={selectedWorker.profilePhoto || selectedWorker.photoURL} size="md" />
+              <div>
+                <p className="text-sm font-black text-slate-900 dark:text-white">{selectedWorker.fullName}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{selectedWorker.village}, {selectedWorker.district} • {selectedWorker.availability || "Available Today"}</p>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900/30 dark:bg-rose-950/20 text-xs text-rose-800 dark:text-rose-400 flex items-center space-x-2">
@@ -165,7 +200,7 @@ export const JobPostingPage: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               
               {/* Workers Needed */}
-              <div className="space-y-1">
+              {!isDirectHiring && <div className="space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   {t("workersNeededCount")}
                 </label>
@@ -182,7 +217,7 @@ export const JobPostingPage: React.FC = () => {
                     className="block w-full rounded-2xl border border-slate-200 py-3.5 pl-10 pr-4 text-sm bg-white dark:border-slate-800 dark:bg-slate-950 text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
                   />
                 </div>
-              </div>
+              </div>}
 
               {/* Wage Offered */}
               <div className="space-y-1">
@@ -206,7 +241,7 @@ export const JobPostingPage: React.FC = () => {
 
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 gap-5">
               <div className="space-y-1">
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   {t("dateOfWork")}
@@ -225,23 +260,7 @@ export const JobPostingPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Work Time
-                </label>
-                <div className="relative">
-                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <Clock className="h-4.5 w-4.5 text-slate-400" />
-                  </div>
-                  <input
-                    type="time"
-                    required
-                    value={workTime}
-                    onChange={(e) => setWorkTime(e.target.value)}
-                    className="block w-full rounded-2xl border border-slate-200 py-3.5 pl-10 pr-4 text-sm bg-white dark:border-slate-800 dark:bg-slate-950 text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
-              </div>
+              <TimePicker value={workTime} onChange={setWorkTime} />
             </div>
 
             <div className="space-y-3 rounded-3xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
@@ -277,7 +296,9 @@ export const JobPostingPage: React.FC = () => {
               <div>
                 <span className="font-bold text-emerald-800 dark:text-emerald-300">Automatic Location Tag Attached</span>
                 <p className="text-slate-500 dark:text-slate-400 mt-0.5">
-                  Your job post will be visible specifically to workers near <strong>{user.village}, {user.state}</strong>.
+                  {isDirectHiring
+                    ? <>This request will be sent only to <strong>{selectedWorker?.fullName}</strong> for {formatDisplayTime(workTime)}.</>
+                    : <>Your emergency job will notify matching workers near <strong>{user.village}, {user.state}</strong>.</>}
                 </p>
               </div>
             </div>
@@ -291,7 +312,7 @@ export const JobPostingPage: React.FC = () => {
               {loading ? (
                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
               ) : (
-                t("submitJob")
+                isDirectHiring ? "Send Direct Hiring Request" : "Post & Notify Nearby Workers"
               )}
             </button>
 

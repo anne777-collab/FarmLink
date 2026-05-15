@@ -95,7 +95,7 @@ export const WorkerDashboard: React.FC = () => {
     }
   };
 
-  const handleWorkflowStatus = async (jobId: string, status: "in_progress" | "completed" | "cancelled") => {
+  const handleWorkflowStatus = async (jobId: string, status: "accepted" | "in_progress" | "completed" | "cancelled") => {
     try {
       await updateJobStatus(jobId, status);
       setToast({ message: status === "cancelled" ? "Offer rejected." : "Job status updated.", type: status === "cancelled" ? "info" : "success" });
@@ -259,6 +259,17 @@ export const WorkerDashboard: React.FC = () => {
 
                       {myApplication?.status === "pending" && (
                         <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">Application sent. Waiting for farmer acceptance.</p>
+                      )}
+
+                      {job.type === "direct" && job.status === "posted" && job.workerId === user.uid && (
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                          <button onClick={() => handleWorkflowStatus(job.id, "accepted")} className="rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700">
+                            <CheckCircle className="mr-1 inline h-4 w-4" />Accept
+                          </button>
+                          <button onClick={() => handleWorkflowStatus(job.id, "cancelled")} className="rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300">
+                            <XCircle className="mr-1 inline h-4 w-4" />Reject
+                          </button>
+                        </div>
                       )}
 
                       {job.workerId === user.uid && (

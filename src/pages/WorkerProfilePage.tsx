@@ -237,6 +237,14 @@ export const WorkerProfilePage: React.FC = () => {
                 <span>{t("whatsapp")}</span>
               </a>
             </div>
+            {user?.role === "farmer" && (
+              <button
+                onClick={() => navigate(`/post-job?workerId=${worker.uid}`)}
+                className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 py-3.5 text-sm font-black text-white shadow-md shadow-emerald-500/10 hover:from-emerald-500 hover:to-green-500"
+              >
+                Send Direct Hiring Request
+              </button>
+            )}
           </div>
 
           {/* Safety Disclaimer */}
