@@ -4,8 +4,6 @@ import {
   signInWithEmailAndPassword as fbSignIn,
   createUserWithEmailAndPassword as fbCreateUser,
   signOut as fbSignOut,
-  GoogleAuthProvider,
-  signInWithPopup
 } from "firebase/auth";
 import { 
   doc, 
@@ -19,12 +17,14 @@ import {
   where,
 } from "firebase/firestore";
 import { LiveLocation, LocationRecord, calculateDistance, acquireLiveLocation } from "../utils/location";
+import { signInWithGooglePopupSafe } from "../services/googleAuth";
 
 // Interface Definitions
 export interface UserProfile {
   uid: string;
   email: string;
   role: "farmer" | "worker";
+  provider?: "password" | "google";
   createdAt?: string;
   distance?: number;
   fullName: string;
@@ -226,6 +226,9 @@ interface AuthUserRecord {
   role: "farmer" | "worker";
   createdAt: string;
   profileCompleted: boolean;
+  fullName?: string;
+  photoURL?: string;
+  provider?: "password" | "google";
 }
 
 const stripUndefined = <T extends object>(value: T): T => {
@@ -337,15 +340,21 @@ const getAuthRecord = (profile: UserProfile): AuthUserRecord => ({
   role: profile.role,
   createdAt: profile.createdAt || new Date().toISOString(),
   profileCompleted: profile.profileCompleted,
+  fullName: profile.fullName || "",
+  photoURL: profile.photoURL || profile.profilePhoto || "",
+  provider: profile.provider || "password",
 });
 
 const composeUserProfile = (authData: AuthUserRecord, roleData?: Partial<UserProfile> | null): UserProfile => {
+  const hasCompletedRoleProfile = authData.profileCompleted && !!roleData;
+
   return {
     uid: authData.uid,
     email: authData.email,
     role: authData.role,
+    provider: authData.provider,
     createdAt: authData.createdAt,
-    fullName: roleData?.fullName || "",
+    fullName: roleData?.fullName || authData.fullName || "",
     mobileNum: roleData?.mobileNum || "",
     village: roleData?.village || "",
     district: roleData?.district || "",
@@ -355,13 +364,13 @@ const composeUserProfile = (authData: AuthUserRecord, roleData?: Partial<UserPro
     longitude: roleData?.longitude ?? FALLBACK_LONGITUDE,
     lastUpdated: roleData?.lastUpdated,
     location: roleData?.location,
-    profileCompleted: authData.profileCompleted,
+    profileCompleted: hasCompletedRoleProfile,
     skills: roleData?.skills,
     wageExpectation: roleData?.wageExpectation,
     experience: roleData?.experience,
     availability: roleData?.availability,
     profilePhoto: roleData?.profilePhoto,
-    photoURL: roleData?.photoURL,
+    photoURL: roleData?.photoURL || authData.photoURL,
     isPremium: roleData?.isPremium,
     savedWorkers: roleData?.savedWorkers,
   };
@@ -551,25 +560,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 });
                 setUser(composeUserProfile(authData, roleData));
             } else {
-              // Not fully registered yet
-              setUser({
+              const pendingRole = sessionStorage.getItem("farmlink_pending_google_role") as "farmer" | "worker" | null;
+              const selectedRole = pendingRole === "farmer" || pendingRole === "worker" ? pendingRole : "farmer";
+              const createdAt = new Date().toISOString();
+              const googleUser: UserProfile = {
                 uid: fbUser.uid,
                 email: fbUser.email || "",
-                role: "worker", // fallback default
-                  createdAt: new Date().toISOString(),
+                role: selectedRole,
+                provider: "google",
+                createdAt,
                 fullName: fbUser.displayName || "",
                 mobileNum: "",
                 village: "",
                 district: "",
                 state: "",
                 pincode: "",
-                latitude: 28.2044, // Default general center
-                longitude: 76.6155,
+                latitude: FALLBACK_LATITUDE,
+                longitude: FALLBACK_LONGITUDE,
                 profileCompleted: false,
-              });
+                photoURL: fbUser.photoURL || "",
+                profilePhoto: fbUser.photoURL || "",
+              };
+              await setDoc(authDocRef, getAuthRecord(googleUser), { merge: true });
+              sessionStorage.removeItem("farmlink_pending_google_role");
+              setUser(googleUser);
             }
           } catch (error) {
             console.error("Error getting user document:", error);
+            setUser(null);
           }
         } else {
           setUser(null);
@@ -599,6 +617,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           uid: credentials.user.uid,
           email,
           role,
+          provider: "password",
           createdAt,
           fullName: "",
           mobileNum: "",
@@ -632,6 +651,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         uid,
         email,
         role,
+        provider: "password",
         fullName: "",
         mobileNum: "",
         village: "",
@@ -690,11 +710,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const loginWithGoogle = async (role: "farmer" | "worker") => {
     setLoading(true);
+    setUser(null);
     if (isFirebaseConfigured) {
       try {
-        const provider = new GoogleAuthProvider();
-        const result = await signInWithPopup(realAuth, provider);
-        const fbUser = result.user;
+        if (!realAuth || !realDb) {
+          throw new Error("Firebase is not configured. Please verify your VITE_FIREBASE_* environment variables.");
+        }
+
+        sessionStorage.setItem("farmlink_pending_google_role", role);
+        const fbUser = await signInWithGooglePopupSafe(realAuth);
         const docRef = doc(realDb, USERS_COLLECTION, fbUser.uid);
         const userDoc = await getDoc(docRef);
 
@@ -708,33 +732,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             authPath: `${USERS_COLLECTION}/${fbUser.uid}`,
             profilePath: `${profileCollection}/${fbUser.uid}`,
           });
+          sessionStorage.removeItem("farmlink_pending_google_role");
           setUser(composeUserProfile(authData, roleData));
+          setLoading(false);
         } else {
-          // New Google login
+          const createdAt = new Date().toISOString();
           const newUser: UserProfile = {
             uid: fbUser.uid,
             email: fbUser.email || "",
             role,
-            createdAt: new Date().toISOString(),
+            provider: "google",
+            createdAt,
             fullName: fbUser.displayName || "",
             mobileNum: "",
             village: "",
             district: "",
             state: "",
             pincode: "",
-            latitude: 28.2044,
-            longitude: 76.6155,
+            latitude: FALLBACK_LATITUDE,
+            longitude: FALLBACK_LONGITUDE,
             profileCompleted: false,
+            photoURL: fbUser.photoURL || "",
+            profilePhoto: fbUser.photoURL || "",
           };
-          await setDoc(docRef, getAuthRecord(newUser));
+          await setDoc(docRef, getAuthRecord(newUser), { merge: true });
           console.debug("[FarmLink][Firestore] created google auth user", {
             path: `${USERS_COLLECTION}/${fbUser.uid}`,
             role,
           });
+          sessionStorage.removeItem("farmlink_pending_google_role");
           setUser(newUser);
+          setLoading(false);
         }
       } catch (err: any) {
+        sessionStorage.removeItem("farmlink_pending_google_role");
+        if (realAuth?.currentUser) {
+          await fbSignOut(realAuth).catch(() => undefined);
+        }
         setLoading(false);
+        setUser(null);
         throw new Error(err.message || "Google Authentication failed.");
       }
     } else {
@@ -745,6 +781,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         uid,
         email,
         role,
+        provider: "google",
         fullName: role === "farmer" ? "Ram Singh" : "Hari Dev",
         mobileNum: "",
         village: "",

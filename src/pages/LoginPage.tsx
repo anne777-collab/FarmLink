@@ -112,40 +112,38 @@ export const LoginPage: React.FC = () => {
         {/* Auth Forms */}
         <form className="space-y-6" onSubmit={handleSubmit}>
           
-          {/* Role selection toggle (only on Sign Up mode) */}
-          {isSignUp && (
-            <div className="space-y-2">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                Choose Your Primary Role
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setRole("farmer")}
-                  className={`flex flex-col items-center justify-center rounded-2xl border p-4 transition-all text-center cursor-pointer ${
-                    role === "farmer"
-                      ? "border-emerald-500 bg-emerald-50/50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                      : "border-slate-200 hover:border-slate-300 text-slate-600 dark:border-slate-800 dark:text-slate-400"
-                  }`}
-                >
-                  <span className="text-2xl mb-1">🌾</span>
-                  <span className="text-xs font-bold">{t("farmer")}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRole("worker")}
-                  className={`flex flex-col items-center justify-center rounded-2xl border p-4 transition-all text-center cursor-pointer ${
-                    role === "worker"
-                      ? "border-emerald-500 bg-emerald-50/50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-                      : "border-slate-200 hover:border-slate-300 text-slate-600 dark:border-slate-800 dark:text-slate-400"
-                  }`}
-                >
-                  <span className="text-2xl mb-1">🧑‍🌾</span>
-                  <span className="text-xs font-bold">{t("worker")}</span>
-                </button>
-              </div>
+          {/* Role selection is used for sign-up and first-time Google accounts. */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {isSignUp ? "Choose Your Primary Role" : "Role for new Google accounts"}
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setRole("farmer")}
+                className={`flex flex-col items-center justify-center rounded-2xl border p-4 transition-all text-center cursor-pointer ${
+                  role === "farmer"
+                    ? "border-emerald-500 bg-emerald-50/50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    : "border-slate-200 hover:border-slate-300 text-slate-600 dark:border-slate-800 dark:text-slate-400"
+                }`}
+              >
+                <span className="text-2xl mb-1">🌾</span>
+                <span className="text-xs font-bold">{t("farmer")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole("worker")}
+                className={`flex flex-col items-center justify-center rounded-2xl border p-4 transition-all text-center cursor-pointer ${
+                  role === "worker"
+                    ? "border-emerald-500 bg-emerald-50/50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                    : "border-slate-200 hover:border-slate-300 text-slate-600 dark:border-slate-800 dark:text-slate-400"
+                }`}
+              >
+                <span className="text-2xl mb-1">🧑‍🌾</span>
+                <span className="text-xs font-bold">{t("worker")}</span>
+              </button>
             </div>
-          )}
+          </div>
 
           {/* Email input */}
           <div className="space-y-1">
