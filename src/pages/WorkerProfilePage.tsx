@@ -109,7 +109,7 @@ export const WorkerProfilePage: React.FC = () => {
                   className="inline-flex items-center space-x-2 rounded-xl border border-emerald-500 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-300 disabled:opacity-50"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshingLocation ? "animate-spin" : ""}`} />
-                  <span>{refreshingLocation ? t("refreshing") : "📍 Refresh Location"}</span>
+                  <span>{refreshingLocation ? t("refreshing") : "📍 Refresh Live Location"}</span>
                 </button>
               )}
             </div>

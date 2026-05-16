@@ -54,6 +54,11 @@ export const FarmerDashboard: React.FC = () => {
 
   // Active jobs created by this farmer
   const myJobs = jobs.filter(j => j.farmerId === user.uid);
+  const directJobs = myJobs.filter((job) => job.type === "direct");
+  const publicJobs = myJobs.filter((job) => job.type !== "direct");
+  const directPendingApprovalJobs = directJobs.filter((job) => job.directStatus === "worker_accepted");
+  const directIncomingJobs = directJobs.filter((job) => job.directStatus === "sent");
+  const directActiveJobs = directJobs.filter((job) => ["farmer_confirmed", "in_progress", "completed", "rated"].includes(job.directStatus || ""));
   const ratingJob = ratingJobId ? myJobs.find(job => job.id === ratingJobId) : null;
   // Fallback to select first job for hiring purposes if not selected
   const activeHiringJobId = selectedJobId || (myJobs.length > 0 ? myJobs[0].id : "");
@@ -140,6 +145,25 @@ export const FarmerDashboard: React.FC = () => {
       setToast({ message: status === "in_progress" ? "Work started." : "Work completed. Worker is available again.", type: "success" });
     } catch (err: any) {
       setToast({ message: err.message || "Could not update job.", type: "error" });
+    }
+  };
+
+  const handleDirectAction = async (jobId: string, status: "accepted" | "cancelled" | "in_progress" | "completed") => {
+    try {
+      await updateJobStatus(jobId, status);
+      setToast({
+        message:
+          status === "accepted"
+            ? "Direct request confirmed."
+            : status === "cancelled"
+              ? "Direct request rejected."
+              : status === "in_progress"
+                ? "Direct work started."
+                : "Direct work completed.",
+        type: "success",
+      });
+    } catch (err: any) {
+      setToast({ message: err.message || "Could not update direct request.", type: "error" });
     }
   };
 
@@ -481,49 +505,161 @@ export const FarmerDashboard: React.FC = () => {
 
           {/* Farmer Job Postings Management Column */}
           <div className="space-y-6">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center space-x-2">
-              <span>🌾</span>
-              <span>Your Active Job Posts</span>
-            </h2>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center space-x-2">
+                  <span>🚨</span>
+                  <span>Direct Hiring Workflow</span>
+                </h2>
+                <Link
+                  to="/emergency-hiring"
+                  className="rounded-xl bg-orange-500 px-4 py-2 text-[10px] font-black uppercase tracking-wider text-white shadow-sm hover:bg-orange-600"
+                >
+                  Emergency Hiring
+                </Link>
+              </div>
 
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
-              
-              {myJobs.length === 0 ? (
-                <div className="text-center py-8 text-xs text-slate-400 space-y-3">
-                  <p>You haven't posted any work requests yet. Post a job to match with nearest workers instantly.</p>
-                  <Link
-                    to="/post-job"
-                    className="inline-flex items-center space-x-1 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 cursor-pointer"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Create Job Post</span>
-                  </Link>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {/* Select menu helper to choose active job context */}
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Selected Hiring Context</span>
-                    <select
-                      value={activeHiringJobId}
-                      onChange={(e) => setSelectedJobId(e.target.value)}
-                      className="block w-full rounded-xl border border-slate-200 py-2.5 px-3 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none"
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
+                {directJobs.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-slate-400 space-y-3">
+                    <p>Open a worker profile and send a direct request to hire one specific worker privately.</p>
+                    <Link
+                      to="/nearby-workers"
+                      className="inline-flex items-center space-x-1 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 cursor-pointer"
                     >
-                      {myJobs.map(job => (
-                        <option key={job.id} value={job.id}>
-                          {job.workType} (₹{job.wageOffered}/day)
-                        </option>
-                      ))}
-                    </select>
+                      <Plus className="h-4 w-4" />
+                      <span>Choose Worker</span>
+                    </Link>
                   </div>
+                ) : (
+                  <div className="space-y-4">
+                    {directIncomingJobs.length > 0 && (
+                      <div className="space-y-3">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Waiting for worker response</span>
+                        {directIncomingJobs.map((job) => (
+                          <div key={job.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs dark:border-slate-800 dark:bg-slate-950">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-black text-slate-900 dark:text-white">{job.workType}</p>
+                                <p className="mt-1 text-[10px] text-slate-400">{job.workerName || "Selected worker"} • {job.village}, {job.district}</p>
+                              </div>
+                              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
+                                Sent
+                              </span>
+                            </div>
+                            <JobTimeline status={job.status} jobType="direct" directStatus={job.directStatus} compact />
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                  <div className="border-t border-slate-100 dark:border-slate-800 pt-3 space-y-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Workflow Jobs ({myJobs.length})</span>
+                    {directPendingApprovalJobs.length > 0 && (
+                      <div className="space-y-3">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Worker accepted — confirm now</span>
+                        {directPendingApprovalJobs.map((job) => {
+                          const worker = workers.find((item) => item.uid === job.workerId);
+                          const stats = job.workerId ? getWorkerStats(job.workerId) : { averageRating: 0, jobsCompleted: 0, totalReviews: 0 };
+                          const trust = job.workerId ? buildTrustProfile(job.workerId, ratings, stats.jobsCompleted) : null;
+
+                          return (
+                            <div key={job.id} className="rounded-2xl border border-emerald-100 bg-emerald-50/30 p-4 text-xs dark:border-emerald-900/30 dark:bg-emerald-950/10 space-y-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  <ProfileAvatar name={job.workerName || worker?.fullName || "Worker"} role="worker" src={worker?.profilePhoto || worker?.photoURL || job.workerProfilePhoto} size="sm" />
+                                  <div>
+                                    <p className="font-black text-slate-900 dark:text-white">{job.workerName || worker?.fullName}</p>
+                                    <p className="text-[10px] text-slate-400">
+                                      {stats.totalReviews ? `${stats.averageRating.toFixed(1)} stars • ${stats.totalReviews} reviews` : "No reviews yet"}
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300">
+                                  Worker accepted
+                                </span>
+                              </div>
+
+                              {trust && <TrustBadges trust={trust} compact />}
+
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                <button onClick={() => navigate(`/worker-profile/${job.workerId}`)} className="rounded-xl border border-slate-200 bg-white py-2 text-[10px] font-black text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                                  View Worker Profile
+                                </button>
+                                <button onClick={() => handleDirectAction(job.id, "accepted")} className="rounded-xl bg-emerald-600 py-2 text-[10px] font-black text-white hover:bg-emerald-700">
+                                  Accept Worker
+                                </button>
+                                <button onClick={() => handleDirectAction(job.id, "cancelled")} className="rounded-xl border border-slate-200 py-2 text-[10px] font-black text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300">
+                                  Reject Worker
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {directActiveJobs.length > 0 && (
+                      <div className="space-y-3">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Active direct work</span>
+                        {directActiveJobs.map((job) => (
+                          <div key={job.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs dark:border-slate-800 dark:bg-slate-950 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-black text-slate-900 dark:text-white">{job.workType}</p>
+                                <p className="mt-1 text-[10px] text-slate-400">{job.workerName || "Worker"} • {job.village}, {job.district}</p>
+                              </div>
+                              <JobStatusBadge status={job.status} />
+                            </div>
+                            <JobTimeline status={job.status} jobType="direct" directStatus={job.directStatus} compact />
+                            {job.status === "accepted" && (
+                              <button onClick={() => handleDirectAction(job.id, "in_progress")} className="w-full rounded-xl bg-amber-500 py-2.5 text-[10px] font-black text-white hover:bg-amber-600">
+                                <Play className="mr-1 inline h-3.5 w-3.5" /> Start Work
+                              </button>
+                            )}
+                            {job.status === "in_progress" && (
+                              <button onClick={() => handleDirectAction(job.id, "completed")} className="w-full rounded-xl bg-emerald-600 py-2.5 text-[10px] font-black text-white hover:bg-emerald-700">
+                                <CheckCircle className="mr-1 inline h-3.5 w-3.5" /> Mark Completed
+                              </button>
+                            )}
+                            {["completed", "rated"].includes(job.status) && job.workerId && !ratings.some((item) => item.jobId === job.id && item.fromUserId === user.uid) && (
+                              <button onClick={() => setRatingJobId(job.id)} className="w-full rounded-xl border border-amber-200 bg-amber-50 py-2.5 text-[10px] font-black text-amber-700 hover:bg-amber-100 dark:border-amber-900/30 dark:bg-amber-950/20 dark:text-amber-300">
+                                <Star className="mr-1 inline h-3.5 w-3.5" /> Rate Worker
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center space-x-2">
+                <span>🌾</span>
+                <span>Emergency Job Posts</span>
+              </h2>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
+                {publicJobs.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-slate-400 space-y-3">
+                    <p>You haven't posted any emergency jobs yet.</p>
+                    <Link
+                      to="/emergency-hiring"
+                      className="inline-flex items-center space-x-1 rounded-xl bg-orange-500 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-orange-600 cursor-pointer"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Create Emergency Job</span>
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Workflow Jobs ({publicJobs.length})</span>
                     <div className="space-y-4 max-h-[42rem] overflow-y-auto pr-1">
-                      {myJobs.map((job) => {
-                        const applications = jobApplications.filter(app => app.jobId === job.id);
-                        const pendingApplications = applications.filter(app => app.status === "pending");
-                        const alreadyRated = ratings.some(item => item.jobId === job.id && item.fromUserId === user.uid);
+                      {publicJobs.map((job) => {
+                        const applications = jobApplications.filter((app) => app.jobId === job.id);
+                        const pendingApplications = applications.filter((app) => app.status === "pending");
+                        const alreadyRated = ratings.some((item) => item.jobId === job.id && item.fromUserId === user.uid);
 
                         return (
                           <div key={job.id} className="space-y-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs dark:border-slate-800/80 dark:bg-slate-950">
@@ -534,12 +670,11 @@ export const FarmerDashboard: React.FC = () => {
                                   <JobStatusBadge status={job.status} />
                                 </div>
                                 <span className="text-[10px] text-slate-400 block">Need {job.workersNeeded} workers • {job.village} • {job.workDate || job.dateTime} {job.workTime}</span>
-                                {job.workerName && <span className="mt-1 block text-[10px] font-bold text-emerald-600">Assigned: {job.workerName}</span>}
                               </div>
                               <span className="font-black text-emerald-600 dark:text-emerald-400">₹{job.wage}/day</span>
                             </div>
 
-                            <JobTimeline status={job.status} compact />
+                            <JobTimeline status={job.status} jobType="emergency" compact />
 
                             {pendingApplications.length > 0 && (
                               <div className="space-y-2">
@@ -602,11 +737,10 @@ export const FarmerDashboard: React.FC = () => {
                       })}
                     </div>
                   </div>
-
-                </div>
-              )}
-
+                )}
+              </div>
             </div>
+
           </div>
 
         </div>

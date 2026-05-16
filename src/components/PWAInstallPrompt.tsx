@@ -12,7 +12,7 @@ export const PWAInstallPrompt: React.FC = () => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem("khetmitra_install_dismissed") === "true";
+    const dismissed = localStorage.getItem("FarmLink_install_dismissed") === "true";
     const handleBeforeInstallPrompt = (event: Event) => {
       event.preventDefault();
       setInstallEvent(event as BeforeInstallPromptEvent);
@@ -34,7 +34,7 @@ export const PWAInstallPrompt: React.FC = () => {
   };
 
   const handleDismiss = () => {
-    localStorage.setItem("khetmitra_install_dismissed", "true");
+    localStorage.setItem("FarmLink_install_dismissed", "true");
     setVisible(false);
   };
 
@@ -52,7 +52,7 @@ export const PWAInstallPrompt: React.FC = () => {
               <Smartphone className="h-6 w-6" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-black text-slate-900 dark:text-white">Install KhetMitra App</p>
+              <p className="text-sm font-black text-slate-900 dark:text-white">Install FarmLink App</p>
               <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                 Add FarmLink to your phone for faster loading, app-like navigation, and offline basic screens.
               </p>

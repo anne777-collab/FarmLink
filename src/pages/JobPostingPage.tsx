@@ -7,14 +7,14 @@ import { TimePicker, formatDisplayTime } from "../components/TimePicker";
 import { ProfileAvatar } from "../components/ProfileAvatar";
 import { IndianRupee, Calendar, Users, AlertCircle, CheckCircle, ArrowLeft, MapPin, FileText, Siren, Send } from "lucide-react";
 
-export const JobPostingPage: React.FC = () => {
+export const JobPostingPage: React.FC<{ mode?: "auto" | "direct" | "emergency" }> = ({ mode = "auto" }) => {
   const { t } = useLanguage();
   const { user, workers, postNewJob } = useApp();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const directWorkerId = searchParams.get("workerId") || "";
   const selectedWorker = workers.find(worker => worker.uid === directWorkerId);
-  const isDirectHiring = !!selectedWorker;
+  const isDirectHiring = (mode === "direct" ? !!selectedWorker : mode === "auto" && !!selectedWorker);
 
   const [workType, setWorkType] = useState("Wheat Cutting");
   const [workersNeeded, setWorkersNeeded] = useState<number>(isDirectHiring ? 1 : 3);
@@ -55,7 +55,8 @@ export const JobPostingPage: React.FC = () => {
         type: isDirectHiring ? "direct" : "emergency",
         workerId: selectedWorker?.uid,
         workerName: selectedWorker?.fullName,
-        title: isDirectHiring ? `Direct request for ${selectedWorker.fullName}` : `Emergency ${workType} workers needed`,
+        workerProfilePhoto: selectedWorker?.profilePhoto || selectedWorker?.photoURL,
+        title: isDirectHiring ? `Direct request for ${selectedWorker?.fullName || "Selected Worker"}` : `Emergency ${workType} workers needed`,
         workType,
         description: description.trim(),
         workersNeeded: isDirectHiring ? 1 : Number(workersNeeded),
@@ -83,8 +84,8 @@ export const JobPostingPage: React.FC = () => {
 
       // Navigate back after small delay
       setTimeout(() => {
-        navigate(isDirectHiring ? `/worker-profile/${selectedWorker.uid}` : "/farmer-dashboard");
-      }, 1500);
+          navigate(isDirectHiring ? `/worker-profile/${selectedWorker.uid}` : "/farmer-dashboard");
+        }, 1500);
 
     } catch (err: any) {
       setError(err.message || "Failed to post job.");
@@ -142,7 +143,7 @@ export const JobPostingPage: React.FC = () => {
             </p>
           </div>
 
-          {selectedWorker && (
+          {selectedWorker && isDirectHiring && (
             <div className="flex items-center gap-3 rounded-3xl border border-slate-100 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <ProfileAvatar name={selectedWorker.fullName} role="worker" src={selectedWorker.profilePhoto || selectedWorker.photoURL} size="md" />
               <div>

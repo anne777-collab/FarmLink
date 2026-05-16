@@ -21,7 +21,7 @@ export const useLiveLocation = (initialLocation: LiveLocation | null = null): Us
     async (previousLocation?: Pick<LocationRecord, "latitude" | "longitude" | "accuracy"> | null) => {
       setIsDetecting(true);
       setError(null);
-      setStatus("📍 Detecting precise location...");
+      setStatus("📍 Detecting precise GPS...");
 
       try {
         const nextLocation = await acquireLiveLocation({

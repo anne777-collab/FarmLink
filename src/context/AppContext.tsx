@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { LiveLocation, LocationRecord, calculateDistance, acquireLiveLocation } from "../utils/location";
 import { signInWithGooglePopupSafe } from "../services/googleAuth";
+import { buildTrustProfile } from "../services/marketplaceIntelligence";
 import { cleanFirestoreData } from "../utils/firestoreData";
 
 // Interface Definitions
@@ -56,6 +57,18 @@ export interface UserProfile {
 export type JobStatus = "posted" | "applied" | "accepted" | "in_progress" | "completed" | "rated" | "cancelled";
 export type ApplicationStatus = "pending" | "accepted" | "rejected" | "withdrawn";
 export type NotificationType = "info" | "success" | "warning" | "job_posted" | "application_received" | "job_accepted" | "work_started" | "work_completed" | "rating_received";
+export type DirectWorkflowStatus = "sent" | "worker_accepted" | "farmer_confirmed" | "in_progress" | "completed" | "rated" | "rejected" | "cancelled";
+export type NotificationKind =
+  | "direct_request"
+  | "direct_worker_accepted"
+  | "direct_farmer_confirmed"
+  | "direct_rejected"
+  | "emergency_job_posted"
+  | "application_received"
+  | "application_reviewed"
+  | "job_progress"
+  | "rating_received"
+  | "generic";
 
 export interface JobPost {
   id: string;
@@ -63,8 +76,10 @@ export interface JobPost {
   farmerId: string;
   farmerName: string;
   farmerMobile?: string;
+  farmerProfilePhoto?: string;
   workerId?: string;
   workerName?: string;
+  workerProfilePhoto?: string;
   title: string;
   workType: string;
   description: string;
@@ -84,11 +99,13 @@ export interface JobPost {
   workDate: string;
   workTime: string;
   status: JobStatus;
+  directStatus?: DirectWorkflowStatus;
   createdAt: string;
   updatedAt: string;
   acceptedAt?: string;
   startedAt?: string;
   completedAt?: string;
+  rejectedAt?: string;
   ratingGiven: boolean;
   additionalNotes?: string;
   // Backward-compatible aliases used by the existing matching UI.
@@ -149,6 +166,25 @@ export interface NotificationItem {
   type: NotificationType;
   createdAt: string;
   read: boolean;
+  kind?: NotificationKind;
+  entityType?: "job" | "application" | "profile" | "system";
+  entityId?: string;
+  jobId?: string;
+  farmerId?: string;
+  workerId?: string;
+  farmerName?: string;
+  farmerPhoto?: string;
+  workerName?: string;
+  workerPhoto?: string;
+  workerRating?: number;
+  workerSkills?: string[];
+  trustScore?: number;
+  wage?: number;
+  workType?: string;
+  workDate?: string;
+  workTime?: string;
+  locationLabel?: string;
+  coordinates?: { latitude: number; longitude: number };
 }
 
 interface AppContextType {
@@ -197,6 +233,7 @@ interface AppContextType {
     type?: "direct" | "emergency" | "marketplace";
     workerId?: string;
     workerName?: string;
+    workerProfilePhoto?: string;
   }) => Promise<void>;
   applyToJob: (jobId: string) => Promise<void>;
   acceptJobApplication: (applicationId: string) => Promise<void>;
@@ -212,7 +249,7 @@ interface AppContextType {
   updateRequestStatus: (requestId: string, status: "accepted" | "declined") => Promise<void>;
   
   // Common Operations
-  addNotification: (userId: string, message: string, type: NotificationType, title?: string) => Promise<void>;
+  addNotification: (userId: string, message: string, type: NotificationType, title?: string, details?: Partial<NotificationItem>) => Promise<void>;
   markNotificationsAsRead: () => Promise<void>;
   
 }
@@ -269,6 +306,7 @@ const buildLocationRecord = (profile: Partial<UserProfile> & { location?: Partia
       latitude: latitude ?? FALLBACK_LATITUDE,
       longitude: longitude ?? FALLBACK_LONGITUDE,
       accuracy: profile.location?.accuracy ?? 0,
+      formattedAddress: profile.location?.formattedAddress,
       lastUpdated: profile.location?.lastUpdated ?? profile.lastUpdated ?? new Date().toISOString(),
     };
   }
@@ -309,8 +347,10 @@ const normalizeJobPost = (raw: Partial<JobPost>): JobPost => {
     farmerId: raw.farmerId ?? "",
     farmerName: raw.farmerName ?? "",
     farmerMobile: raw.farmerMobile ?? "",
+    farmerProfilePhoto: raw.farmerProfilePhoto,
     workerId: raw.workerId,
     workerName: raw.workerName,
+    workerProfilePhoto: raw.workerProfilePhoto,
     title: raw.title ?? raw.workType ?? "Farm Work",
     workType: raw.workType ?? "Farm Work",
     description: raw.description ?? raw.notes ?? "",
@@ -324,11 +364,13 @@ const normalizeJobPost = (raw: Partial<JobPost>): JobPost => {
     workDate,
     workTime: raw.workTime ?? "",
     status: status as JobStatus,
+    directStatus: raw.directStatus,
     createdAt: raw.createdAt ?? new Date().toISOString(),
     updatedAt: raw.updatedAt ?? raw.createdAt ?? new Date().toISOString(),
     acceptedAt: raw.acceptedAt,
     startedAt: raw.startedAt,
     completedAt: raw.completedAt,
+    rejectedAt: raw.rejectedAt,
     ratingGiven: raw.ratingGiven ?? false,
     additionalNotes: raw.additionalNotes ?? raw.notes,
     wageOffered: wage,
@@ -343,6 +385,21 @@ const normalizeJobPost = (raw: Partial<JobPost>): JobPost => {
     distance: raw.distance,
   };
 };
+
+const mapJobToLegacyRequest = (job: JobPost): JobRequest => ({
+  id: job.id,
+  jobId: job.id,
+  workerId: job.workerId || "",
+  farmerId: job.farmerId,
+  farmerName: job.farmerName,
+  farmerMobile: job.farmerMobile || "",
+  workerName: job.workerName || "",
+  workerMobile: "",
+  workType: job.workType,
+  wageOffered: job.wage,
+  status: job.type === "direct" && job.directStatus === "rejected" ? "declined" : job.type === "direct" && job.directStatus === "farmer_confirmed" ? "accepted" : "pending",
+  createdAt: job.createdAt,
+});
 
 const getProfileCollectionName = (role: "farmer" | "worker") => {
   return role === "worker" ? WORKERS_COLLECTION : FARMERS_COLLECTION;
@@ -410,10 +467,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = localStorage.getItem("farmlink_jobs");
     return saved ? JSON.parse(saved) : [];
   });
-  const [simRequests, setSimRequests] = useState<JobRequest[]>(() => {
-    const saved = localStorage.getItem("farmlink_requests");
-    return saved ? JSON.parse(saved) : [];
-  });
   const [simApplications, setSimApplications] = useState<JobApplication[]>(() => {
     const saved = localStorage.getItem("farmlink_job_applications");
     return saved ? JSON.parse(saved) : [];
@@ -439,12 +492,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem("farmlink_jobs", JSON.stringify(simJobs));
     }
   }, [simJobs]);
-
-  useEffect(() => {
-    if (!isFirebaseConfigured) {
-      localStorage.setItem("farmlink_requests", JSON.stringify(simRequests));
-    }
-  }, [simRequests]);
 
   useEffect(() => {
     if (!isFirebaseConfigured) {
@@ -488,15 +535,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       const unsubscribeJobs = onSnapshot(collection(realDb, JOBS_COLLECTION), (snapshot) => {
-        setJobs(snapshot.docs.map((docSnap) => normalizeJobPost({ id: docSnap.id, ...(docSnap.data() as Partial<JobPost>) })));
+        const nextJobs = snapshot.docs.map((docSnap) => normalizeJobPost({ id: docSnap.id, ...(docSnap.data() as Partial<JobPost>) }));
+        setJobs(nextJobs);
+        setRequests(nextJobs.filter((job) => job.type === "direct").map(mapJobToLegacyRequest));
       }, (error) => {
         console.error("Error listening to jobs collection:", error);
-      });
-
-      const unsubscribeRequests = onSnapshot(collection(realDb, "requests"), (snapshot) => {
-        setRequests(snapshot.docs.map((docSnap) => docSnap.data() as JobRequest));
-      }, (error) => {
-        console.error("Error listening to requests collection:", error);
       });
 
       const unsubscribeApplications = onSnapshot(collection(realDb, APPLICATIONS_COLLECTION), (snapshot) => {
@@ -522,6 +565,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             type: data.type ?? "info",
             createdAt: data.createdAt ?? new Date().toISOString(),
             read: data.read ?? false,
+            kind: data.kind,
+            entityType: data.entityType,
+            entityId: data.entityId,
+            jobId: data.jobId,
+            farmerId: data.farmerId,
+            workerId: data.workerId,
+            farmerName: data.farmerName,
+            farmerPhoto: data.farmerPhoto,
+            workerName: data.workerName,
+            workerPhoto: data.workerPhoto,
+            workerRating: data.workerRating,
+            workerSkills: data.workerSkills,
+            trustScore: data.trustScore,
+            wage: data.wage,
+            workType: data.workType,
+            workDate: data.workDate,
+            workTime: data.workTime,
+            locationLabel: data.locationLabel,
+            coordinates: data.coordinates,
           } as NotificationItem;
         }));
       }, (error) => {
@@ -534,7 +596,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unsubscribeWorkers();
         unsubscribeFarmers();
         unsubscribeJobs();
-        unsubscribeRequests();
         unsubscribeApplications();
         unsubscribeRatings();
         unsubscribeNotifications();
@@ -545,13 +606,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const farmersList = Object.values(simUsers).filter(u => u.role === "farmer" && u.profileCompleted);
     setWorkers(workersList);
     setFarmers(farmersList);
-    setJobs(simJobs.map(job => normalizeJobPost(job)));
-    setRequests(simRequests);
+    const nextJobs = simJobs.map(job => normalizeJobPost(job));
+    setJobs(nextJobs);
+    setRequests(nextJobs.filter((job) => job.type === "direct").map(mapJobToLegacyRequest));
     setJobApplications(simApplications);
     setRatings(simRatings);
     setNotifications(simNotifications);
     setLoading(false);
-  }, [isFirebaseConfigured, simUsers, simJobs, simRequests, simApplications, simRatings, simNotifications]);
+  }, [isFirebaseConfigured, simUsers, simJobs, simApplications, simRatings, simNotifications]);
 
   // Auth observer
   useEffect(() => {
@@ -889,6 +951,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       latitude: liveLoc.latitude,
       longitude: liveLoc.longitude,
       accuracy: liveLoc.accuracy,
+      formattedAddress: liveLoc.formattedAddress,
       lastUpdated: liveLoc.lastUpdated,
     };
 
@@ -912,6 +975,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       latitude: nextLocation.latitude,
       longitude: nextLocation.longitude,
       accuracy: nextLocation.accuracy,
+      formattedAddress: nextLocation.formattedAddress,
       lastUpdated: nextLocation.lastUpdated,
     });
     const roleCollection = getProfileCollectionName(user.role);
@@ -929,6 +993,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         pincode: nextLocation.pincode,
         latitude: nextLocation.latitude,
         longitude: nextLocation.longitude,
+        formattedAddress: nextLocation.formattedAddress,
         lastUpdated: nextLocation.lastUpdated,
       }), { merge: true });
     } else {
@@ -965,7 +1030,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getNearbyJobs = (): JobPost[] => {
     if (!user || user.role !== "worker") return [];
 
-    const matched = jobs.filter(job => ["posted", "applied"].includes(job.status)).map(job => {
+    const matched = jobs.filter(job => job.type !== "direct" && ["posted", "applied"].includes(job.status)).map(job => {
       const distance = calculateDistance(
         resolveLatitude(user),
         resolveLongitude(user),
@@ -1019,6 +1084,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       farmerMobile: user.mobileNum || "",
       workerId: jobData.workerId,
       workerName: jobData.workerName,
+      workerProfilePhoto: jobData.workerProfilePhoto,
       title: jobData.title || `${jobData.workType} needed`,
       workType: jobData.workType,
       description: jobData.description || notes,
@@ -1038,6 +1104,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       workDate,
       workTime: jobData.workTime || "",
       status: "posted",
+      directStatus: jobType === "direct" ? "sent" : undefined,
       createdAt,
       updatedAt: createdAt,
       ratingGiven: false,
@@ -1060,12 +1127,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (jobType === "direct" && jobData.workerId) {
+      const targetWorker = workers.find((worker) => worker.uid === jobData.workerId);
+      const trust = targetWorker ? buildTrustProfile(targetWorker.uid, ratings, getWorkerStats(targetWorker.uid).jobsCompleted) : null;
       await addNotification(
         jobData.workerId,
         `${user.fullName || "A farmer"} sent you a direct hiring request for ${jobData.workType} at ₹${wage}/day.`,
         "job_posted",
-        "Direct hiring request"
+        "Direct hiring request",
+        {
+          kind: "direct_request",
+          entityType: "job",
+          entityId: id,
+          jobId: id,
+          farmerId: user.uid,
+          farmerName: user.fullName,
+          farmerPhoto: user.profilePhoto || user.photoURL,
+          workerId: jobData.workerId,
+          workerName: jobData.workerName,
+          workerPhoto: jobData.workerProfilePhoto,
+          wage,
+          workType: jobData.workType,
+          workDate,
+          workTime: jobData.workTime,
+          locationLabel: `${jobData.village}, ${jobData.district}`,
+          coordinates: { latitude: jobData.latitude, longitude: jobData.longitude },
+          workerRating: trust?.averageRating,
+          workerSkills: targetWorker?.skills,
+          trustScore: trust?.trustScore,
+        }
       );
+      setRequests((prev) => [mapJobToLegacyRequest(newJob), ...prev.filter((request) => request.jobId !== id)]);
       return;
     }
 
@@ -1093,7 +1184,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         worker.uid,
         `Emergency ${jobData.workType} job near ${jobData.village} offers ₹${wage}/day. Apply quickly if available.`,
         "job_posted",
-        "Emergency hiring nearby"
+        "Emergency hiring nearby",
+        {
+          kind: "emergency_job_posted",
+          entityType: "job",
+          entityId: id,
+          jobId: id,
+          farmerId: user.uid,
+          farmerName: user.fullName,
+          farmerPhoto: user.profilePhoto || user.photoURL,
+          wage,
+          workType: jobData.workType,
+          workDate,
+          workTime: jobData.workTime,
+          locationLabel: `${jobData.village}, ${jobData.district}`,
+          coordinates: { latitude: jobData.latitude, longitude: jobData.longitude },
+        }
       );
     }
   };
@@ -1118,6 +1224,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!user || user.role !== "worker") throw new Error("Only workers can apply to jobs.");
     const job = jobs.find(j => j.id === jobId);
     if (!job) throw new Error("Job not found.");
+    if (job.type === "direct") throw new Error("Direct hiring jobs are private to the selected worker.");
     if (!["posted", "applied"].includes(job.status)) throw new Error("This job is no longer accepting applications.");
     if (jobApplications.some(app => app.jobId === jobId && app.workerId === user.uid && app.status !== "withdrawn")) {
       throw new Error("You have already applied to this job.");
@@ -1150,7 +1257,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       job.farmerId,
       `${user.fullName || "A worker"} applied for ${job.workType}. Review their profile and accept or reject the application.`,
       "application_received",
-      "Application received"
+      "Application received",
+      {
+        kind: "application_received",
+        entityType: "application",
+        entityId: id,
+        jobId,
+        farmerId: job.farmerId,
+        workerId: user.uid,
+        workerName: user.fullName,
+        workerPhoto: user.profilePhoto || user.photoURL,
+        workType: job.workType,
+        wage: job.wage,
+        workDate: job.workDate,
+        workTime: job.workTime,
+        locationLabel: `${job.village}, ${job.district}`,
+        coordinates: job.coordinates,
+      }
     );
   };
 
@@ -1181,7 +1304,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     await setWorkerAvailability(application.workerId, "Busy / Booked");
-    await addNotification(application.workerId, `Your application for ${job.workType} was accepted by ${user.fullName}.`, "job_accepted", "Job accepted");
+    await addNotification(application.workerId, `Your application for ${job.workType} was accepted by ${user.fullName}.`, "job_accepted", "Job accepted", {
+      kind: "application_reviewed",
+      entityType: "job",
+      entityId: job.id,
+      jobId: job.id,
+      farmerId: job.farmerId,
+      workerId: application.workerId,
+      farmerName: user.fullName,
+      workType: job.workType,
+      wage: job.wage,
+      workDate: job.workDate,
+      workTime: job.workTime,
+      locationLabel: `${job.village}, ${job.district}`,
+      coordinates: job.coordinates,
+    });
   };
 
   const rejectJobApplication = async (applicationId: string) => {
@@ -1197,47 +1334,169 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSimApplications(prev => prev.map(app => app.id === applicationId ? { ...app, status: "rejected" } : app));
     }
 
-    await addNotification(application.workerId, `Your application for ${job.workType} was not selected this time.`, "warning", "Application update");
+    await addNotification(application.workerId, `Your application for ${job.workType} was not selected this time.`, "warning", "Application update", {
+      kind: "application_reviewed",
+      entityType: "application",
+      entityId: applicationId,
+      jobId: job.id,
+      farmerId: job.farmerId,
+      workerId: application.workerId,
+      workType: job.workType,
+      wage: job.wage,
+    });
   };
 
   const updateJobStatus = async (jobId: string, nextStatus: JobStatus) => {
     if (!user) throw new Error("Must be logged in.");
-    const job = jobs.find(j => j.id === jobId);
+    const job = jobs.find((item) => item.id === jobId);
     if (!job) throw new Error("Job not found.");
 
     const isFarmerOwner = user.role === "farmer" && job.farmerId === user.uid;
     const isAssignedWorker = user.role === "worker" && job.workerId === user.uid;
     if (!isFarmerOwner && !isAssignedWorker) throw new Error("You are not allowed to update this job.");
-    const isDirectAcceptance = job.type === "direct" && job.status === "posted" && nextStatus === "accepted" && isAssignedWorker;
-    if (nextStatus !== "cancelled" && !isDirectAcceptance && !canMoveJobStatus(job.status, nextStatus)) {
-      throw new Error(`Invalid workflow transition: ${job.status} to ${nextStatus}.`);
-    }
-    if (nextStatus === "in_progress" && !isAssignedWorker && !isFarmerOwner) throw new Error("Only the assigned job participants can start work.");
-    if (nextStatus === "completed" && !isAssignedWorker && !isFarmerOwner) throw new Error("Only the assigned job participants can complete work.");
 
     const now = new Date().toISOString();
-    const patch: Partial<JobPost> = { status: nextStatus, updatedAt: now };
-    if (nextStatus === "in_progress") patch.startedAt = now;
-    if (nextStatus === "completed") patch.completedAt = now;
+    let patch: Partial<JobPost> | null = null;
+    let notificationTargetId: string | undefined;
+    let notificationType: NotificationType = "info";
+    let notificationTitle = "Job status updated";
+    let notificationMessage = `${job.workType} is now ${nextStatus.replace("_", " ")}.`;
+    let notificationDetails: Partial<NotificationItem> = {};
+
+    if (job.type === "direct") {
+      if (nextStatus === "cancelled") {
+        if (!isFarmerOwner && !isAssignedWorker) throw new Error("You are not allowed to cancel this direct job.");
+        patch = { status: "cancelled", directStatus: "cancelled", rejectedAt: now, updatedAt: now };
+        notificationTargetId = isFarmerOwner ? job.workerId : job.farmerId;
+        notificationType = "warning";
+        notificationTitle = "Direct request cancelled";
+        notificationMessage = `${job.workType} direct hiring was cancelled.`;
+        notificationDetails = {
+          kind: "direct_rejected",
+          entityType: "job",
+          entityId: job.id,
+          jobId: job.id,
+          farmerId: job.farmerId,
+          workerId: job.workerId,
+          workType: job.workType,
+          wage: job.wage,
+          workDate: job.workDate,
+          workTime: job.workTime,
+          locationLabel: `${job.village}, ${job.district}`,
+          coordinates: job.coordinates,
+        };
+      } else if (nextStatus === "accepted" && isAssignedWorker && job.directStatus === "sent") {
+        patch = { directStatus: "worker_accepted", updatedAt: now };
+        notificationTargetId = job.farmerId;
+        const workerStats = getWorkerStats(job.workerId || user.uid);
+        const workerProfile = workers.find((worker) => worker.uid === (job.workerId || user.uid));
+        const trust = buildTrustProfile(job.workerId || user.uid, ratings, workerStats.jobsCompleted);
+        notificationType = "success";
+        notificationTitle = "Worker accepted direct request";
+        notificationMessage = `${job.workerName || workerProfile?.fullName || "Worker"} accepted the direct request for ${job.workType}.`;
+        notificationDetails = {
+          kind: "direct_worker_accepted",
+          entityType: "job",
+          entityId: job.id,
+          jobId: job.id,
+          farmerId: job.farmerId,
+          workerId: job.workerId,
+          workerName: workerProfile?.fullName || job.workerName,
+          workerPhoto: workerProfile?.profilePhoto || workerProfile?.photoURL || job.workerProfilePhoto,
+          workerRating: trust.averageRating,
+          workerSkills: workerProfile?.skills,
+          trustScore: trust.trustScore,
+          wage: job.wage,
+          workType: job.workType,
+          workDate: job.workDate,
+          workTime: job.workTime,
+          locationLabel: `${job.village}, ${job.district}`,
+          coordinates: job.coordinates,
+        };
+      } else if (nextStatus === "accepted" && isFarmerOwner && job.directStatus === "worker_accepted") {
+        patch = { status: "accepted", directStatus: "farmer_confirmed", acceptedAt: now, updatedAt: now };
+        notificationTargetId = job.workerId;
+        notificationType = "success";
+        notificationTitle = "Farmer confirmed worker";
+        notificationMessage = `${job.farmerName} confirmed you for ${job.workType}.`;
+        notificationDetails = {
+          kind: "direct_farmer_confirmed",
+          entityType: "job",
+          entityId: job.id,
+          jobId: job.id,
+          farmerId: job.farmerId,
+          farmerName: job.farmerName,
+          farmerPhoto: job.farmerProfilePhoto,
+          workerId: job.workerId,
+          workerName: job.workerName,
+          wage: job.wage,
+          workType: job.workType,
+          workDate: job.workDate,
+          workTime: job.workTime,
+          locationLabel: `${job.village}, ${job.district}`,
+          coordinates: job.coordinates,
+        };
+      } else if (nextStatus === "in_progress" && (isFarmerOwner || isAssignedWorker) && ["accepted", "in_progress"].includes(job.status)) {
+        patch = { status: "in_progress", directStatus: "in_progress", startedAt: now, updatedAt: now };
+        notificationTargetId = isFarmerOwner ? job.workerId : job.farmerId;
+        notificationType = "success";
+        notificationTitle = "Work started";
+        notificationMessage = `${job.workType} direct work has started.`;
+      } else if (nextStatus === "completed" && (isFarmerOwner || isAssignedWorker) && ["accepted", "in_progress", "completed"].includes(job.status)) {
+        patch = { status: "completed", directStatus: "completed", completedAt: now, updatedAt: now };
+        notificationTargetId = isFarmerOwner ? job.workerId : job.farmerId;
+        notificationType = "success";
+        notificationTitle = "Work completed";
+        notificationMessage = `${job.workType} direct work has been marked complete.`;
+      } else if (nextStatus === "rated" && (isFarmerOwner || isAssignedWorker) && ["completed", "rated"].includes(job.status)) {
+        patch = { status: "rated", directStatus: "rated", updatedAt: now };
+      } else {
+        throw new Error(`Invalid direct workflow transition: ${job.directStatus || job.status} to ${nextStatus}.`);
+      }
+    } else {
+      if (nextStatus !== "cancelled" && !canMoveJobStatus(job.status, nextStatus)) {
+        throw new Error(`Invalid workflow transition: ${job.status} to ${nextStatus}.`);
+      }
+      if (nextStatus === "in_progress" && !isAssignedWorker && !isFarmerOwner) throw new Error("Only the assigned job participants can start work.");
+      if (nextStatus === "completed" && !isAssignedWorker && !isFarmerOwner) throw new Error("Only the assigned job participants can complete work.");
+
+      patch = { status: nextStatus, updatedAt: now };
+      if (nextStatus === "in_progress") patch.startedAt = now;
+      if (nextStatus === "completed") patch.completedAt = now;
+      if (nextStatus === "cancelled") patch.rejectedAt = now;
+      notificationTargetId = user.uid === job.farmerId ? job.workerId : job.farmerId;
+      notificationType = nextStatus === "in_progress" ? "work_started" : nextStatus === "completed" ? "work_completed" : "info";
+      notificationMessage = `${job.workType} is now ${nextStatus.replace("_", " ")}.`;
+    }
+
+    if (!patch) return;
+
     const updatedJob = normalizeJobPost({ ...job, ...patch });
 
     if (isFirebaseConfigured) {
       await setDoc(doc(realDb, JOBS_COLLECTION, jobId), cleanFirestoreData(patch), { merge: true });
     } else {
-      setSimJobs(prev => prev.map(item => item.id === jobId ? updatedJob : item));
+      setSimJobs((prev) => prev.map((item) => item.id === jobId ? updatedJob : item));
+      if (job.type === "direct") {
+        setRequests((prev) => prev.map((request) => request.jobId === jobId ? mapJobToLegacyRequest(updatedJob) : request));
+      }
     }
 
-    if (nextStatus === "completed" && job.workerId) {
+    if (job.type !== "direct" && nextStatus === "completed" && job.workerId) {
       await setWorkerAvailability(job.workerId, "Available Today");
     }
-    if (nextStatus === "accepted" && job.workerId) {
+    if (job.type !== "direct" && nextStatus === "accepted" && job.workerId) {
       await setWorkerAvailability(job.workerId, "Busy / Booked");
     }
+    if (job.type === "direct" && nextStatus === "accepted" && isFarmerOwner && job.workerId) {
+      await setWorkerAvailability(job.workerId, "Busy / Booked");
+    }
+    if (job.type === "direct" && nextStatus === "completed" && job.workerId) {
+      await setWorkerAvailability(job.workerId, "Available Today");
+    }
 
-    const notifyUserId = user.uid === job.farmerId ? job.workerId : job.farmerId;
-    if (notifyUserId) {
-      const type = nextStatus === "in_progress" ? "work_started" : nextStatus === "completed" ? "work_completed" : "info";
-      await addNotification(notifyUserId, `${job.workType} is now ${nextStatus.replace("_", " ")}.`, type, "Job status updated");
+    if (notificationTargetId) {
+      await addNotification(notificationTargetId, notificationMessage, notificationType, notificationTitle, notificationDetails);
     }
   };
 
@@ -1313,39 +1572,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const hireWorkerRequest = async (workerId: string, jobId: string) => {
-    if (!user) return;
+    if (!user || user.role !== "farmer") return;
     const selectedJob = jobs.find(j => j.id === jobId);
     const targetWorker = workers.find(w => w.uid === workerId);
     if (!selectedJob || !targetWorker) return;
-
-    const id = "req_" + Math.random().toString(36).substring(2, 9);
-    const newRequest: JobRequest = {
-      id,
-      jobId,
+    await postNewJob({
+      type: "direct",
       workerId,
-      farmerId: user.uid,
-      farmerName: user.fullName,
-      farmerMobile: user.mobileNum,
       workerName: targetWorker.fullName,
-      workerMobile: targetWorker.mobileNum,
+      workerProfilePhoto: targetWorker.profilePhoto || targetWorker.photoURL,
       workType: selectedJob.workType,
-      wageOffered: selectedJob.wageOffered,
-      status: "pending",
-      createdAt: new Date().toISOString(),
-    };
-
-    if (isFirebaseConfigured) {
-      await setDoc(doc(realDb, "requests", id), cleanFirestoreData(newRequest));
-    } else {
-      setSimRequests(prev => [newRequest, ...prev]);
-    }
-
-    // Notify worker
-    await addNotification(
-      workerId,
-      `📩 Direct hire request from farmer ${user.fullName} for ${selectedJob.workType}!`,
-      "success"
-    );
+      title: `Direct request for ${targetWorker.fullName}`,
+      description: selectedJob.description,
+      workersNeeded: 1,
+      wage: selectedJob.wage,
+      village: selectedJob.village,
+      district: selectedJob.district,
+      state: selectedJob.state,
+      pincode: selectedJob.pincode,
+      latitude: selectedJob.latitude,
+      longitude: selectedJob.longitude,
+      workDate: selectedJob.workDate,
+      workTime: selectedJob.workTime,
+      notes: selectedJob.notes,
+      additionalNotes: selectedJob.additionalNotes,
+    });
   };
 
   const upgradePremiumStatus = () => {
@@ -1356,24 +1607,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- WORKER ACTIONS ---
 
   const updateRequestStatus = async (requestId: string, status: "accepted" | "declined") => {
-    if (isFirebaseConfigured) {
-      await updateDoc(doc(realDb, "requests", requestId), cleanFirestoreData({ status }));
-    } else {
-      setSimRequests(prev => prev.map(r => r.id === requestId ? { ...r, status } : r));
-    }
+    const req = requests.find((item) => item.id === requestId);
+    if (!req) throw new Error("Request not found.");
+    if (!user) throw new Error("Must be logged in.");
 
-    const req = requests.find(r => r.id === requestId);
-    if (req) {
-      const message = status === "accepted"
-        ? `✅ Worker ${req.workerName} accepted your hire request for ${req.workType}! Contact them: +91 ${req.workerMobile}`
-        : `❌ Worker ${req.workerName} declined your hire request for ${req.workType}.`;
-      await addNotification(req.farmerId, message, status === "accepted" ? "success" : "warning");
+    const job = jobs.find((item) => item.id === req.jobId);
+    if (!job) throw new Error("Job not found.");
+
+    if (status === "accepted") {
+      await updateJobStatus(job.id, "accepted");
+    } else {
+      await updateJobStatus(job.id, "cancelled");
     }
   };
 
   // --- NOTIFICATION ACTIONS ---
 
-  const addNotification = async (userId: string, message: string, type: NotificationType, title = "FarmLink update") => {
+  const addNotification = async (userId: string, message: string, type: NotificationType, title = "FarmLink update", details: Partial<NotificationItem> = {}) => {
     const id = "notif_" + Math.random().toString(36).substring(2, 9);
     const newNotif: NotificationItem = {
       id,
@@ -1383,6 +1633,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       type,
       createdAt: new Date().toISOString(),
       read: false,
+      ...details,
     };
 
     if (isFirebaseConfigured) {

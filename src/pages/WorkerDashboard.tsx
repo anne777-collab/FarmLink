@@ -7,13 +7,13 @@ import { RatingModal } from "../components/RatingModal";
 import { rankJobsForWorker } from "../services/marketplaceIntelligence";
 import { 
   IndianRupee, Briefcase, MapPin, RefreshCw, 
-  CheckCircle, XCircle, Bell, Check, AlertCircle, Send, Play, Star
+  CheckCircle, XCircle, Bell, AlertCircle, Send, Play, Star
 } from "lucide-react";
 
 export const WorkerDashboard: React.FC = () => {
   const { t } = useLanguage();
   const {
-    user, requests, notifications, refreshUserLocation, updateRequestStatus,
+    user, notifications, refreshUserLocation,
     completeUserProfile, getNearbyJobs, jobApplications, jobs, applyToJob,
     updateJobStatus, submitRating, ratings
   } = useApp();
@@ -26,18 +26,16 @@ export const WorkerDashboard: React.FC = () => {
 
   if (!user) return null;
 
-  // Filter requests belonging to this worker
-  const myRequests = requests.filter(req => req.workerId === user.uid);
-  const pendingRequests = myRequests.filter(req => req.status === "pending");
-  const acceptedRequests = myRequests.filter(req => req.status === "accepted");
-  const nearbyJobs = getNearbyJobs();
+  const directRequests = jobs.filter((job) => job.type === "direct" && job.workerId === user.uid && job.directStatus === "sent");
+  const directWorkflowJobs = jobs.filter((job) => job.type === "direct" && job.workerId === user.uid && !["sent", "rejected", "cancelled"].includes(job.directStatus || ""));
+  const publicNearbyJobs = getNearbyJobs();
   const recommendedJobs = rankJobsForWorker(
-    nearbyJobs.filter(job => !jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid)),
+    publicNearbyJobs.filter(job => !jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid)),
     user
   );
-  const workflowJobs = jobs.filter(job => job.workerId === user.uid || jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid));
-  const activeWorkflowJobs = workflowJobs.filter(job => !["completed", "rated", "cancelled"].includes(job.status));
-  const completedWorkflowJobs = workflowJobs.filter(job => ["completed", "rated"].includes(job.status));
+  const publicWorkflowJobs = jobs.filter(job => job.type !== "direct" && (job.workerId === user.uid || jobApplications.some(app => app.jobId === job.id && app.workerId === user.uid)));
+  const activeWorkflowJobs = [...directWorkflowJobs, ...publicWorkflowJobs].filter(job => !["completed", "rated", "cancelled"].includes(job.status));
+  const completedWorkflowJobs = [...directWorkflowJobs, ...publicWorkflowJobs].filter(job => ["completed", "rated"].includes(job.status));
   const ratingJob = ratingJobId ? jobs.find(job => job.id === ratingJobId) : null;
 
   // Dynamic statistics from database (initially empty)
@@ -71,18 +69,6 @@ export const WorkerDashboard: React.FC = () => {
       });
     } catch (err) {
       setToast({ message: "Failed to update status", type: "error" });
-    }
-  };
-
-  const handleRequestAction = async (requestId: string, status: "accepted" | "declined") => {
-    try {
-      await updateRequestStatus(requestId, status);
-      setToast({
-        message: status === "accepted" ? "Work offer accepted! The farmer has been notified." : "Offer declined.",
-        type: status === "accepted" ? "success" : "info"
-      });
-    } catch (err) {
-      setToast({ message: "Action failed", type: "error" });
     }
   };
 
@@ -146,7 +132,7 @@ export const WorkerDashboard: React.FC = () => {
               className="rounded-xl border border-emerald-500 bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/20 dark:text-emerald-300 flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
             >
               <RefreshCw className={`h-4.5 w-4.5 shrink-0 ${refreshingLocation ? "animate-spin text-emerald-600" : ""}`} />
-              <span>{refreshingLocation ? t("refreshing") : t("refreshLocation")}</span>
+              <span>{refreshingLocation ? t("refreshing") : "📍 Refresh Live Location"}</span>
             </button>
 
             {/* Quick Availability Status selector */}
@@ -234,6 +220,44 @@ export const WorkerDashboard: React.FC = () => {
               <span>Nearby Jobs & Workflow</span>
             </h2>
 
+            {directRequests.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400">Direct Requests</h3>
+                {directRequests.map((job) => (
+                  <div key={job.id} className="rounded-3xl border border-emerald-100 bg-white p-5 shadow-sm dark:border-emerald-900/30 dark:bg-slate-900">
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <h3 className="text-lg font-black text-slate-900 dark:text-white">{job.workType}</h3>
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">Sent</span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">From {job.farmerName} • {job.village}, {job.district}</p>
+                        <p className="mt-2 text-[10px] font-bold text-slate-400">{job.workDate} {job.workTime}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-slate-400">Daily Wage</p>
+                        <p className="text-lg font-black text-emerald-600">₹{job.wage}</p>
+                      </div>
+                    </div>
+
+                    <JobTimeline status={job.status} jobType="direct" directStatus={job.directStatus} compact />
+
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <button onClick={() => navigate(`/farmer-profile/${job.farmerId}`)} className="rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300">
+                        View Farmer Profile
+                      </button>
+                      <button onClick={() => handleWorkflowStatus(job.id, "accepted")} className="rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700">
+                        <CheckCircle className="mr-1 inline h-4 w-4" />Accept
+                      </button>
+                      <button onClick={() => handleWorkflowStatus(job.id, "cancelled")} className="rounded-xl border border-slate-200 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300">
+                        <XCircle className="mr-1 inline h-4 w-4" />Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {activeWorkflowJobs.length > 0 && (
               <div className="space-y-4">
                 {activeWorkflowJobs.map((job) => {
@@ -255,13 +279,21 @@ export const WorkerDashboard: React.FC = () => {
                         </div>
                       </div>
 
-                      <JobTimeline status={job.status} compact />
+                      <JobTimeline status={job.status} jobType={job.type === "direct" ? "direct" : "emergency"} directStatus={job.directStatus} compact />
+
+                      {job.type === "direct" && job.directStatus === "worker_accepted" && (
+                        <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">You accepted this request. Waiting for farmer confirmation.</p>
+                      )}
+
+                      {job.type === "direct" && job.directStatus === "farmer_confirmed" && (
+                        <p className="mt-4 rounded-2xl bg-emerald-50 p-3 text-xs font-bold text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-300">Farmer confirmed you. You can start work when ready.</p>
+                      )}
 
                       {myApplication?.status === "pending" && (
                         <p className="mt-4 rounded-2xl bg-amber-50 p-3 text-xs font-bold text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">Application sent. Waiting for farmer acceptance.</p>
                       )}
 
-                      {job.type === "direct" && job.status === "posted" && job.workerId === user.uid && (
+                      {job.type === "direct" && job.directStatus === "sent" && job.workerId === user.uid && (
                         <div className="mt-4 grid grid-cols-2 gap-2">
                           <button onClick={() => handleWorkflowStatus(job.id, "accepted")} className="rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700">
                             <CheckCircle className="mr-1 inline h-4 w-4" />Accept
@@ -329,92 +361,17 @@ export const WorkerDashboard: React.FC = () => {
               )}
             </div>
 
-            {pendingRequests.length === 0 && activeWorkflowJobs.length === 0 && nearbyJobs.length === 0 ? (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-12 text-center space-y-4">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-50 dark:bg-slate-950">
-                  <Briefcase className="h-7 w-7 text-slate-400" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">{t("noJobRequests")}</h3>
-                <p className="mx-auto max-w-sm text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-                  {t("noJobRequestsSub")}
-                </p>
-                <div className="pt-2">
-                  <button 
-                    onClick={handleRefreshLocation}
-                    className="inline-flex items-center space-x-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 cursor-pointer"
-                  >
-                    <span>📍 {t("refreshLocation")}</span>
-                  </button>
-                </div>
-              </div>
-            ) : pendingRequests.length > 0 ? (
-              <div className="space-y-4">
-                {pendingRequests.map((req) => (
-                  <div key={req.id} className="bg-white dark:bg-slate-900 border-2 border-emerald-500/10 rounded-2xl p-6 space-y-4 shadow-sm hover:border-emerald-500/30 transition-all">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className="inline-flex items-center space-x-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950/20 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-300">
-                          <Check className="h-3 w-3" />
-                          <span>Hiring Offer</span>
-                        </span>
-                        <h3 className="text-lg font-black text-slate-900 dark:text-white mt-1.5">{req.workType}</h3>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm text-slate-400 font-medium">Daily Wage</p>
-                        <p className="text-lg font-black text-emerald-600 dark:text-emerald-400">₹{req.wageOffered}</p>
-                      </div>
-                    </div>
-
-                    <div className="border-t border-b border-slate-100 dark:border-slate-800/80 py-3 grid grid-cols-2 gap-4 text-xs">
-                      <div>
-                        <span className="text-slate-400 block font-medium">Farmer</span>
-                        <span className="font-bold text-slate-800 dark:text-slate-200">{req.farmerName}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Date posted</span>
-                        <span className="font-bold text-slate-800 dark:text-slate-200">{new Date(req.createdAt).toLocaleDateString()}</span>
-                      </div>
-                    </div>
-
-                    {/* Accept/Decline CTA */}
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => handleRequestAction(req.id, "accepted")}
-                        className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer"
-                      >
-                        <CheckCircle className="h-4.5 w-4.5" />
-                        <span>{t("accept")}</span>
-                      </button>
-                      <button
-                        onClick={() => handleRequestAction(req.id, "declined")}
-                        className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-rose-600 dark:border-slate-800 dark:text-slate-300 cursor-pointer"
-                      >
-                        <XCircle className="h-4.5 w-4.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {/* Completed Work History section (Optional nice touch) */}
-            {acceptedRequests.length > 0 && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400">Your Accepted Job List</h3>
-                <div className="space-y-3">
-                  {acceptedRequests.map((req) => (
-                    <div key={req.id} className="bg-emerald-50/40 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/30 rounded-2xl p-4 flex justify-between items-center text-xs">
-                      <div className="space-y-1">
-                        <span className="font-bold text-slate-800 dark:text-slate-200">{req.workType}</span>
-                        <p className="text-[10px] text-slate-400">Employer: {req.farmerName} ({req.farmerMobile})</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="rounded bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 text-[10px] dark:bg-emerald-950/50 dark:text-emerald-300">Active / Accepted</span>
-                        <p className="font-black text-slate-700 dark:text-slate-300 mt-1">₹{req.wageOffered}/day</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {directRequests.length === 0 && activeWorkflowJobs.length === 0 && recommendedJobs.length === 0 && (
+              <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center dark:border-slate-800 dark:bg-slate-900">
+                <Briefcase className="mx-auto h-8 w-8 text-slate-300" />
+                <h3 className="mt-3 text-sm font-black text-slate-900 dark:text-white">{t("noJobRequests")}</h3>
+                <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">{t("noJobRequestsSub")}</p>
+                <button
+                  onClick={handleRefreshLocation}
+                  className="mt-4 inline-flex items-center space-x-1.5 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                >
+                  <span>📍 {t("refreshLocation")}</span>
+                </button>
               </div>
             )}
 

@@ -20,7 +20,9 @@ import { WorkerDashboard } from "./pages/WorkerDashboard";
 import { FarmerDashboard } from "./pages/FarmerDashboard";
 import { NearbyWorkersPage } from "./pages/NearbyWorkersPage";
 import { JobPostingPage } from "./pages/JobPostingPage";
+import { EmergencyHiringPage } from "./pages/EmergencyHiringPage";
 import { WorkerProfilePage } from "./pages/WorkerProfilePage";
+import { FarmerProfilePage } from "./pages/FarmerProfilePage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { SubscriptionPage } from "./pages/SubscriptionPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -113,10 +115,26 @@ export default function App() {
                     }
                   />
                   <Route
+                    path="/emergency-hiring"
+                    element={
+                      <ProtectedRoute allowedRole="farmer">
+                        <EmergencyHiringPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/worker-profile/:id"
                     element={
                       <ProtectedRoute allowedRole="farmer">
                         <WorkerProfilePage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/farmer-profile/:id"
+                    element={
+                      <ProtectedRoute allowedRole="worker">
+                        <FarmerProfilePage />
                       </ProtectedRoute>
                     }
                   />

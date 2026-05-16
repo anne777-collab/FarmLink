@@ -6,6 +6,7 @@ export interface LocationRecord {
   latitude: number;
   longitude: number;
   accuracy: number;
+  formattedAddress?: string;
   lastUpdated: string;
 }
 
@@ -18,13 +19,13 @@ export interface AcquireLocationOptions {
 
 const GPS_OPTIONS: PositionOptions = {
   enableHighAccuracy: true,
-  timeout: 30000,
+  timeout: 20000,
   maximumAge: 0,
 };
 
 const SAMPLE_COUNT = 3;
 const SAMPLE_INTERVAL_MS = 2000;
-const ACCEPTABLE_ACCURACY_METERS = 1000;
+const ACCEPTABLE_ACCURACY_METERS = 300;
 const STABLE_JUMP_KM = 5;
 const STORAGE_KEY = "farmlink_last_stable_location";
 
@@ -64,12 +65,43 @@ const getNavigatorPosition = (): Promise<GeolocationPosition> => {
 
 const isStrongEnough = (accuracy: number) => accuracy <= ACCEPTABLE_ACCURACY_METERS;
 
+const gpsPermissionMessage = (error: { code?: number }) => {
+  if (error.code === 1) {
+    return "Please enable PRECISE location in browser/mobile settings.";
+  }
+  if (error.code === 3) {
+    return "GPS timeout. Keep the device outdoors and try again.";
+  }
+  return "Unable to detect precise GPS right now.";
+};
+
 const normalizeCoordinates = (position: GeolocationPosition) => ({
   latitude: position.coords.latitude,
   longitude: position.coords.longitude,
   accuracy: position.coords.accuracy,
   timestamp: position.timestamp,
 });
+
+const averageCoordinates = (samples: GeolocationPosition[]) => {
+  const weightFor = (accuracy: number) => Math.max(1, ACCEPTABLE_ACCURACY_METERS - accuracy);
+  const totals = samples.reduce(
+    (acc, sample) => {
+      const weight = weightFor(sample.coords.accuracy);
+      acc.latitude += sample.coords.latitude * weight;
+      acc.longitude += sample.coords.longitude * weight;
+      acc.accuracy += sample.coords.accuracy;
+      acc.weight += weight;
+      return acc;
+    },
+    { latitude: 0, longitude: 0, accuracy: 0, weight: 0 }
+  );
+
+  return {
+    latitude: totals.latitude / totals.weight,
+    longitude: totals.longitude / totals.weight,
+    accuracy: totals.accuracy / samples.length,
+  };
+};
 
 /**
  * Collects 3 GPS samples and returns the best accurate reading.
@@ -97,8 +129,13 @@ export async function getHighAccuracyCoordinates(
         sampleIndex,
         ...normalizeCoordinates(position),
       });
+      progress(options.onProgress, `GPS accuracy: ${position.coords.accuracy.toFixed(1)} meters`);
     } catch (error) {
       console.debug("[FarmLink][GPS] sample rejected", { sampleIndex, error });
+      if (typeof error === "object" && error && "code" in error) {
+        throw new Error(gpsPermissionMessage(error as { code?: number }));
+      }
+      throw error;
     }
 
     if (sampleIndex < SAMPLE_COUNT) {
@@ -115,68 +152,52 @@ export async function getHighAccuracyCoordinates(
     .sort((a, b) => a.coords.accuracy - b.coords.accuracy);
 
   if (acceptableSamples.length === 0) {
-    if (storedLocation) {
-      progress(options.onProgress, "GPS readings were weak. Keeping the last stable coordinates.");
-      console.debug("[FarmLink][GPS] reusing stable location", storedLocation);
-      return {
-        latitude: storedLocation.latitude,
-        longitude: storedLocation.longitude,
-        accuracy: storedLocation.accuracy,
-        altitude: null,
-        altitudeAccuracy: null,
-        heading: null,
-        speed: null,
-      } as GeolocationCoordinates;
-    }
-
-    throw new Error("GPS accuracy was too weak. Move outdoors and try again.");
+    throw new Error("Weak GPS signal. Please move outdoors or enable precise location.");
   }
 
-  const selectedSample =
-    acceptableSamples.find((sample) => {
-      if (!storedLocation) return true;
+  const filteredSamples = acceptableSamples.filter((sample) => {
+    if (!storedLocation) return true;
+    const jumpKm = calculateDistance(
+      storedLocation.latitude,
+      storedLocation.longitude,
+      sample.coords.latitude,
+      sample.coords.longitude
+    );
 
-      const jumpKm = calculateDistance(
-        storedLocation.latitude,
-        storedLocation.longitude,
-        sample.coords.latitude,
-        sample.coords.longitude
-      );
-
-      if (jumpKm > STABLE_JUMP_KM) {
-        console.debug("[FarmLink][GPS] rejected jump", {
-          jumpKm,
-          previous: storedLocation,
-          candidate: normalizeCoordinates(sample),
-        });
-        return false;
-      }
-
-      return true;
-    }) ?? null;
-
-  if (!selectedSample) {
-    if (storedLocation) {
-      progress(options.onProgress, "GPS jump was too large. Keeping the last stable coordinates.");
-      console.debug("[FarmLink][GPS] rejected unstable jump, reusing stable location", storedLocation);
-      return {
-        latitude: storedLocation.latitude,
-        longitude: storedLocation.longitude,
-        accuracy: storedLocation.accuracy,
-        altitude: null,
-        altitudeAccuracy: null,
-        heading: null,
-        speed: null,
-      } as GeolocationCoordinates;
+    if (jumpKm > STABLE_JUMP_KM) {
+      console.debug("[FarmLink][GPS] rejected jump", {
+        jumpKm,
+        previous: storedLocation,
+        candidate: normalizeCoordinates(sample),
+      });
+      return false;
     }
 
+    return true;
+  });
+
+  if (filteredSamples.length === 0) {
     throw new Error("GPS coordinates were too unstable. Please try again outdoors.");
   }
 
-  progress(options.onProgress, `Selected GPS fix with accuracy ${selectedSample.coords.accuracy.toFixed(1)}m.`);
-  console.debug("[FarmLink][GPS] selected coordinates", normalizeCoordinates(selectedSample));
+  const selectedSample = filteredSamples[0];
+  const averaged = averageCoordinates(filteredSamples);
+  progress(options.onProgress, `Selected GPS fix with accuracy ${averaged.accuracy.toFixed(1)}m.`);
+  console.debug("[FarmLink][GPS] selected coordinates", {
+    bestSample: normalizeCoordinates(selectedSample),
+    averaged,
+  });
 
-  return selectedSample.coords;
+  if (!isStrongEnough(averaged.accuracy)) {
+    throw new Error("Weak GPS signal. Please move outdoors or enable precise location.");
+  }
+
+  return {
+    ...selectedSample.coords,
+    latitude: averaged.latitude,
+    longitude: averaged.longitude,
+    accuracy: averaged.accuracy,
+  };
 }
 
 const pickAddressValue = (address: Record<string, string | undefined>, keys: string[], fallback: string) => {
@@ -229,32 +250,35 @@ export async function reverseGeocode(
 
     const village = pickAddressValue(
       address,
-      ["village", "town", "suburb", "city", "district", "hamlet", "county", "municipality", "city_district", "locality", "neighbourhood"],
-      "Unknown Village"
+      ["village", "suburb", "locality", "hamlet", "neighbourhood"],
+      ""
     );
 
     const district = pickAddressValue(
       address,
-      ["district", "county", "city", "state_district", "municipality"],
-      "Local Area"
+      ["district", "county", "city_district", "municipality", "state_district", "city"],
+      ""
     );
 
-    const state = pickAddressValue(address, ["state", "region", "province", "state_district"], "Haryana");
+    const state = pickAddressValue(address, ["state", "region", "province"], "");
     const pincode = pickAddressValue(address, ["postcode"], "");
+    const formattedAddress = typeof data.display_name === "string" ? data.display_name : "";
 
     return {
-      village,
-      district,
-      state,
+      village: village || district || state || "Unknown Location",
+      district: district || state || "Unknown District",
+      state: state || "Unknown State",
       pincode,
+      formattedAddress,
     };
   } catch (error) {
     console.error("[FarmLink][GPS] reverse geocoding error", error);
     return {
-      village: "Rewari",
-      district: "Rewari",
-      state: "Haryana",
-      pincode: "123401",
+      village: "Unknown Location",
+      district: "Unknown District",
+      state: "Unknown State",
+      pincode: "",
+      formattedAddress: "",
     };
   }
 }

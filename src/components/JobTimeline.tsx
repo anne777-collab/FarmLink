@@ -1,9 +1,9 @@
 import React from "react";
 import { CheckCircle, Circle, Clock } from "lucide-react";
 import { motion } from "framer-motion";
-import { JobStatus } from "../context/AppContext";
+import { DirectWorkflowStatus, JobStatus } from "../context/AppContext";
 
-const steps: Array<{ status: JobStatus; label: string }> = [
+const publicSteps: Array<{ status: JobStatus; label: string }> = [
   { status: "posted", label: "Posted" },
   { status: "applied", label: "Applied" },
   { status: "accepted", label: "Accepted" },
@@ -12,14 +12,30 @@ const steps: Array<{ status: JobStatus; label: string }> = [
   { status: "rated", label: "Rated" },
 ];
 
-export const JobTimeline: React.FC<{ status: JobStatus; compact?: boolean }> = ({ status, compact = false }) => {
-  const activeIndex = steps.findIndex(step => step.status === status);
-  const cancelled = status === "cancelled";
+const directSteps: Array<{ status: DirectWorkflowStatus; label: string }> = [
+  { status: "sent", label: "Sent" },
+  { status: "worker_accepted", label: "Worker Accepted" },
+  { status: "farmer_confirmed", label: "Farmer Confirmed" },
+  { status: "in_progress", label: "In Progress" },
+  { status: "completed", label: "Completed" },
+  { status: "rated", label: "Rated" },
+];
+
+export const JobTimeline: React.FC<{
+  status: JobStatus;
+  jobType?: "direct" | "emergency" | "marketplace";
+  directStatus?: DirectWorkflowStatus;
+  compact?: boolean;
+}> = ({ status, jobType = "emergency", directStatus, compact = false }) => {
+  const steps = jobType === "direct" ? directSteps : publicSteps;
+  const currentStatus = jobType === "direct" ? (directStatus || "sent") : status;
+  const activeIndex = steps.findIndex(step => step.status === currentStatus);
+  const cancelled = jobType === "direct" ? currentStatus === "cancelled" || status === "cancelled" || directStatus === "rejected" : status === "cancelled";
 
   if (cancelled) {
     return (
       <div className="rounded-2xl border border-rose-100 bg-rose-50 p-3 text-xs font-bold text-rose-700 dark:border-rose-900/30 dark:bg-rose-950/20 dark:text-rose-300">
-        Job cancelled
+        {jobType === "direct" ? "Direct request cancelled" : "Job cancelled"}
       </div>
     );
   }
@@ -52,7 +68,7 @@ export const JobTimeline: React.FC<{ status: JobStatus; compact?: boolean }> = (
               />
             )}
             <div className="relative mx-auto mb-1 flex h-6 w-6 items-center justify-center">
-              {complete ? <CheckCircle className="h-5 w-5" /> : current ? <Clock className="h-5 w-5 animate-pulse" /> : <Circle className="h-5 w-5" />}
+               {complete ? <CheckCircle className="h-5 w-5" /> : current ? <Clock className="h-5 w-5 animate-pulse" /> : <Circle className="h-5 w-5" />}
             </div>
             <span className="relative text-[10px] font-black uppercase tracking-wide">{step.label}</span>
           </motion.div>

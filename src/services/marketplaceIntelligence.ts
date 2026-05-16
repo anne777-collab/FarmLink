@@ -1,4 +1,4 @@
-import { JobPost, RatingItem, UserProfile } from "../context/AppContext";
+import type { JobPost, RatingItem, UserProfile } from "../context/AppContext";
 
 export interface TrustProfile {
   averageRating: number;

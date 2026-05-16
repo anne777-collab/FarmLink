@@ -77,6 +77,12 @@ export const NearbyWorkersPage: React.FC = () => {
           >
             Post Agriculture Job
           </Link>
+          <Link
+            to="/emergency-hiring"
+            className="rounded-xl border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-700 px-4 py-2 text-xs font-bold cursor-pointer dark:border-orange-900/30 dark:bg-orange-950/20 dark:text-orange-300"
+          >
+            Emergency Hiring
+          </Link>
         </div>
 
         {/* Banner Title */}
